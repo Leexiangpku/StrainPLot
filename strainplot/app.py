@@ -16,9 +16,10 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from . import dataio, palettes, render
+from . import variables as V
 from .style import CONFIG_DIR, PRESETS, Style, reference_style
 
-APP_TITLE = "StrainPlot · 拉伸曲线一键处理与科研绘图"
+APP_TITLE = "StrainPlot · 一键数据绘图（X–Y 通用）"
 BG = "#F4F5F7"
 CARD = "#FFFFFF"
 ACCENT = "#3F6CA8"
@@ -104,6 +105,19 @@ class App(tk.Tk):
         self._q: queue.Queue = queue.Queue()
         self._axis_side = tk.StringVar(value="X")
         self._unidir = tk.StringVar(value="in")
+        self.tables: list[dataio.Table] = []
+        self.xmap = dataio.XYMap()
+        self._col_catalog: list[tuple[str, str, str]] = []
+        self._col_by_label: dict[str, str] = {}
+        self._label_by_col: dict[str, str] = {}
+        self._scan_warnings: list[str] = []
+        self._scan_skipped: list[str] = []
+        self.xy_preset_var = tk.StringVar(value=self._preset_label("tensile"))
+        self.xkind_var = tk.StringVar()
+        self.ykind_var = tk.StringVar()
+        self.custom_var = tk.BooleanVar(value=False)
+        self.xcol_var = tk.StringVar()
+        self.ycol_var = tk.StringVar()
         self.path_var = tk.StringVar(value=self._default_folder())
         self.rule_var = tk.StringVar(value="auto")
         self.status_var = tk.StringVar(value="就绪：请选择数据文件夹")
@@ -181,7 +195,7 @@ class App(tk.Tk):
         ttk.Label(bar, text="导入规则").pack(side="left", padx=(12, 3))
         ttk.Combobox(bar, textvariable=self.rule_var, width=6, state="readonly",
                      values=["auto", "all", "xlsx", "csv"]).pack(side="left")
-        ttk.Label(bar, text="auto = 有 Excel 时优先用 Excel", style="Hint.TLabel").pack(side="left", padx=6)
+        ttk.Label(bar, text="auto = 全部读取（推荐）", style="Hint.TLabel").pack(side="left", padx=6)
 
         ttk.Button(bar, text="⑤ 导出图片", command=self.open_export).pack(side="right")
         ttk.Button(bar, text="载入样式", command=self.load_style).pack(side="right", padx=4)
@@ -265,17 +279,20 @@ class App(tk.Tk):
 
         self.nb = ttk.Notebook(wrap)
         self.nb.pack(fill="both", expand=True, padx=4, pady=4)
+        self.tab_var = ScrollFrame(self.nb)
         self.tab_palette = ScrollFrame(self.nb)
         self.tab_fig = ScrollFrame(self.nb)
         self.tab_axis = ScrollFrame(self.nb)
         self.tab_font = ScrollFrame(self.nb)
         self.tab_legend = ScrollFrame(self.nb)
         self.tab_series = ScrollFrame(self.nb)
-        for tab, text in ((self.tab_palette, "配色"), (self.tab_fig, "图表"),
-                          (self.tab_axis, "坐标轴"), (self.tab_font, "字体"),
-                          (self.tab_legend, "图例"), (self.tab_series, "曲线")):
+        for tab, text in ((self.tab_var, "变量"), (self.tab_palette, "配色"),
+                          (self.tab_fig, "图表"), (self.tab_axis, "坐标轴"),
+                          (self.tab_font, "字体"), (self.tab_legend, "图例"),
+                          (self.tab_series, "曲线")):
             self.nb.add(tab, text=text)
 
+        self._build_variable_tab()
         self._build_palette_tab()
         self._build_figure_tab()
         self._build_axis_tab()
@@ -381,6 +398,204 @@ class App(tk.Tk):
 
         btn.configure(command=pick)
         ttk.Label(row, text="点击换色", style="Hint.TLabel").pack(side="left", padx=6)
+
+    # ------------------------------------------------------------------ #
+    # 变量页（v2 核心）
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _preset_label(pid: str) -> str:
+        p = V.PRESET_BY_ID.get(pid, V.PRESET_BY_ID[V.DEFAULT_PRESET])
+        return f"{p.group} / {p.name}"
+
+    def _build_variable_tab(self) -> None:
+        tab = self.tab_var.body
+        ttk.Label(tab, text="画哪两列（X → Y）", style="Head.TLabel").pack(
+            anchor="w", padx=8, pady=(8, 0))
+        ttk.Label(tab, text="选一个常见组合，或自定义任意两列；换变量不会重新读文件",
+                  style="Hint.TLabel").pack(anchor="w", padx=8, pady=(0, 4))
+
+        ttk.Label(tab, text="组合预设", style="Head.TLabel").pack(anchor="w", padx=8, pady=(6, 0))
+        self.preset_box = ttk.Combobox(tab, textvariable=self.xy_preset_var, state="readonly",
+                                       values=V.preset_labels(), width=30)
+        self.preset_box.pack(fill="x", padx=8, pady=(2, 0))
+        self.preset_box.bind("<<ComboboxSelected>>", lambda _e: self._on_preset())
+        self.preset_note = ttk.Label(tab, text="", style="Hint.TLabel")
+        self.preset_note.pack(anchor="w", padx=8)
+
+        self._kind_labels = [f"{k.label}  {k.desc}" for k in V.KINDS]
+        self._kind_by_label = {lbl: k.id for lbl, k in zip(self._kind_labels, V.KINDS)}
+        self._label_by_kind = {k.id: lbl for lbl, k in zip(self._kind_labels, V.KINDS)}
+
+        for axis in ("x", "y"):
+            self._sep(tab, f"{'X 轴' if axis == 'x' else 'Y 轴'}变量")
+            var = self.xkind_var if axis == "x" else self.ykind_var
+            box = ttk.Combobox(tab, textvariable=var, state="readonly",
+                               values=self._kind_labels, width=30)
+            box.pack(fill="x", padx=8, pady=2)
+            box.bind("<<ComboboxSelected>>",
+                     lambda _e, a=axis: self._on_kind(a))
+            ent = ttk.Entry(tab)
+            row = ttk.Frame(tab)
+            row.pack(fill="x", padx=8, pady=2)
+            ttk.Label(row, text="单位", width=5).pack(side="left")
+            ent = ttk.Entry(row, width=10)
+            ent.pack(side="left")
+            ent.bind("<Return>", lambda _e, a=axis, w=ent: self._on_unit(a, w.get()))
+            ttk.Label(row, text="空 = 用默认", style="Hint.TLabel").pack(side="left", padx=6)
+            if axis == "x":
+                self.xunit_entry = ent
+            else:
+                self.yunit_entry = ent
+
+            row2 = ttk.Frame(tab)
+            row2.pack(fill="x", padx=8, pady=2)
+            ttk.Label(row2, text="轴标题", width=5).pack(side="left")
+            lent = ttk.Entry(row2, width=22)
+            lent.pack(side="left", fill="x", expand=True)
+            lent.bind("<Return>", lambda _e, a=axis, w=lent: self._on_label(a, w.get()))
+            lent.bind("<FocusOut>", lambda _e, a=axis, w=lent: self._on_label(a, w.get()))
+            if axis == "x":
+                self.xlabel_entry = lent
+            else:
+                self.ylabel_entry = lent
+
+        act = ttk.Frame(tab)
+        act.pack(fill="x", padx=8, pady=(8, 2))
+        ttk.Button(act, text="⇄  反转 X–Y", width=14,
+                   command=self.swap_xy).pack(side="left")
+        ttk.Button(act, text="按预设重置", width=12,
+                   command=lambda: self._on_preset(force=True)).pack(side="left", padx=6)
+
+        self._sep(tab, "自定义两列")
+        ttk.Checkbutton(tab, text="不按类型，直接指定列", variable=self.custom_var,
+                        command=self._on_custom_toggle).pack(anchor="w", padx=8)
+        self.custom_box = ttk.Frame(tab)
+        self.custom_box.pack(fill="x", padx=8)
+        for axis, var in (("x", self.xcol_var), ("y", self.ycol_var)):
+            row = ttk.Frame(self.custom_box)
+            row.pack(fill="x", pady=2)
+            ttk.Label(row, text=("X 列" if axis == "x" else "Y 列"), width=5).pack(side="left")
+            cb = ttk.Combobox(row, textvariable=var, state="readonly", width=26)
+            cb.pack(side="left", fill="x", expand=True)
+            cb.bind("<<ComboboxSelected>>", lambda _e, a=axis: self._on_custom_col(a))
+        self._set_custom_state()
+
+        self._sep(tab, "检测到的列")
+        self.col_hint = ttk.Label(tab, text="（扫描后显示）", style="Hint.TLabel",
+                                  justify="left", wraplength=290)
+        self.col_hint.pack(anchor="w", padx=8, pady=(0, 8))
+
+        self._sync_var_widgets()
+
+    # ---- 变量页事件 ----
+    def _set_custom_state(self) -> None:
+        state = "readonly" if self.custom_var.get() else "disabled"
+        for child in self.custom_box.winfo_children():
+            for sub in child.winfo_children():
+                if isinstance(sub, ttk.Combobox):
+                    sub.configure(state=state)
+
+    def _on_preset(self, force: bool = False) -> None:
+        p = V.preset_from_label(self.xy_preset_var.get())
+        self.xmap.x_kind, self.xmap.y_kind = p.x, p.y
+        self.xmap.x_label = self.xmap.y_label = ""
+        self.xmap.x_unit = self.xmap.y_unit = None
+        self.custom_var.set(p.id == "custom")
+        if p.id != "custom":
+            self.xmap.x_col = self.xmap.y_col = ""
+            self.xcol_var.set("")
+            self.ycol_var.set("")
+        self._sync_var_widgets()
+        self.preset_note.configure(text=p.note)
+        self._apply_mapping()
+
+    def _on_kind(self, axis: str) -> None:
+        var = self.xkind_var if axis == "x" else self.ykind_var
+        kid = self._kind_by_label.get(var.get(), "plain")
+        if axis == "x":
+            self.xmap.x_kind, self.xmap.x_col, self.xmap.x_label = kid, "", ""
+            self.xcol_var.set("")
+        else:
+            self.xmap.y_kind, self.xmap.y_col, self.xmap.y_label = kid, "", ""
+            self.ycol_var.set("")
+        self._apply_mapping()
+
+    def _on_unit(self, axis: str, text: str) -> None:
+        text = text.strip()
+        if axis == "x":
+            self.xmap.x_unit = text or None
+            base = re.sub(r"\s*\([^()]*\)\s*$", "", self.xmap.x_label).strip()
+            self.xmap.x_label = f"{base} ({text})" if (text and base) else base
+        else:
+            self.xmap.y_unit = text or None
+            base = re.sub(r"\s*\([^()]*\)\s*$", "", self.xmap.y_label).strip()
+            self.xmap.y_label = f"{base} ({text})" if (text and base) else base
+        self._apply_mapping()
+
+    def _on_label(self, axis: str, text: str) -> None:
+        text = text.strip()
+        if axis == "x":
+            self.xmap.x_label = text
+        else:
+            self.xmap.y_label = text
+        self._apply_mapping()
+
+    def _col_title(self, key: str) -> str:
+        """自定义列 → 轴标题（表头 + 单位）。"""
+        for t in self.tables:
+            for c in t.columns:
+                if c.key == key:
+                    u = c.unit.strip()
+                    return f"{c.header} ({u})" if u else c.header
+        return key
+
+    def _on_custom_toggle(self) -> None:
+        self._set_custom_state()
+        if self.custom_var.get():
+            self.xmap.x_col = self._col_by_label.get(self.xcol_var.get(), "")
+            self.xmap.y_col = self._col_by_label.get(self.ycol_var.get(), "")
+        else:
+            self.xmap.x_col = self.xmap.y_col = ""
+        self._apply_mapping()
+
+    def _on_custom_col(self, axis: str) -> None:
+        var = self.xcol_var if axis == "x" else self.ycol_var
+        key = self._col_by_label.get(var.get(), "")
+        if axis == "x":
+            self.xmap.x_col = key
+            if key:
+                self.xmap.x_label = self._col_title(key)
+        else:
+            self.xmap.y_col = key
+            if key:
+                self.xmap.y_label = self._col_title(key)
+        self.custom_var.set(True)
+        self._set_custom_state()
+        self._apply_mapping()
+
+    def swap_xy(self) -> None:
+        self.xmap = self.xmap.swapped()
+        self._sync_var_widgets()
+        self._apply_mapping()
+
+    def _sync_var_widgets(self) -> None:
+        """把 xmap 的当前状态写回界面控件。"""
+        m = self.xmap
+        self.xkind_var.set(self._label_by_kind.get(m.x_kind, self._kind_labels[0]))
+        self.ykind_var.set(self._label_by_kind.get(m.y_kind, self._kind_labels[0]))
+        kx, ky = V.kind(m.x_kind), V.kind(m.y_kind)
+        self.xunit_entry.delete(0, "end")
+        self.xunit_entry.insert(0, "" if m.x_unit is None else m.x_unit)
+        self.yunit_entry.delete(0, "end")
+        self.yunit_entry.insert(0, "" if m.y_unit is None else m.y_unit)
+        self.xlabel_entry.delete(0, "end")
+        self.xlabel_entry.insert(0, m.x_label)
+        self.ylabel_entry.delete(0, "end")
+        self.ylabel_entry.insert(0, m.y_label)
+        self.preset_note.configure(text=f"{kx.label} → {ky.label}")
+        self.xcol_var.set(self._label_by_col.get(m.x_col, m.x_col))
+        self.ycol_var.set(self._label_by_col.get(m.y_col, m.y_col))
+        self._set_custom_state()
 
     # ------------------------------------------------------------------ #
     # 配色页
@@ -557,7 +772,7 @@ class App(tk.Tk):
         top = ttk.Frame(self.tab_axis.body)
         top.pack(fill="x", padx=8, pady=(8, 4))
         ttk.Label(top, text="编辑").pack(side="left")
-        for side, text in (("X", "X 轴（应变）"), ("Y", "Y 轴（应力）")):
+        for side, text in (("X", "X 轴"), ("Y", "Y 轴")):
             ttk.Radiobutton(top, text=text, value=side, variable=self._axis_side,
                             command=self._rebuild_axis_tab).pack(side="left", padx=3)
         self.axis_body = ttk.Frame(self.tab_axis.body)
@@ -845,8 +1060,8 @@ class App(tk.Tk):
 
         def worker() -> None:
             try:
-                res = dataio.scan_folder(path, prefer=rule)
-                self._q.put(("scan", res))
+                res = dataio.scan_tables(path, prefer=rule)
+                self._q.put(("tables", res))
             except Exception as exc:         # pragma: no cover
                 self._q.put(("error", exc))
 
@@ -856,8 +1071,8 @@ class App(tk.Tk):
         try:
             while True:
                 kind, payload = self._q.get_nowait()
-                if kind == "scan":
-                    self._apply_scan(payload)
+                if kind in ("tables", "scan"):
+                    self._apply_tables(payload)
                 else:
                     self.status_var.set(f"读取失败：{payload}")
                     messagebox.showerror("读取失败", str(payload))
@@ -865,46 +1080,104 @@ class App(tk.Tk):
             pass
         self.after(80, self._poll_queue)
 
-    def _apply_scan(self, res) -> None:
-        self.series_list = list(res.series)
+    # ------------------------------------------------------------------ #
+    # 扫描结果 → 表 → 曲线
+    # ------------------------------------------------------------------ #
+    def _apply_tables(self, res) -> None:
+        self.tables = list(getattr(res, "tables", []) or [])
+        self._scan_skipped = list(getattr(res, "skipped", []) or [])
+        self._scan_warnings = list(getattr(res, "warnings", []) or [])
+        self._col_catalog = dataio.column_catalog(self.tables)
+        self._refresh_col_catalog()
+        self._rebuild_series()
+
+    def _refresh_col_catalog(self) -> None:
+        values = [c[1] for c in self._col_catalog]
+        mapping = {c[1]: c[0] for c in self._col_catalog}
+        self._col_by_label = mapping
+        self._label_by_col = {c[0]: c[1] for c in self._col_catalog}
+        for child in self.custom_box.winfo_children():
+            for sub in child.winfo_children():
+                if isinstance(sub, ttk.Combobox):
+                    sub.configure(values=values)
+        if self.tables:
+            kinds = {}
+            for t in self.tables:
+                for c in t.columns:
+                    if c.index in t.data:
+                        kinds[c.kind] = kinds.get(c.kind, 0) + 1
+            top = sorted(kinds.items(), key=lambda kv: -kv[1])[:6]
+            lines = [f"· {V.kind(k).label}：{n} 列" for k, n in top]
+            self.col_hint.configure(
+                text=f"{len(self.tables)} 个数据表，共 {len(values)} 种列\n" + "\n".join(lines))
+        else:
+            self.col_hint.configure(text="（没有扫描到可绘制的数值列）")
+
+    def _apply_mapping(self) -> None:
+        """X/Y 映射变了：同步轴标题、刷新曲线（不重新读文件）。"""
+        self._rebuild_series()
+
+    def _rebuild_series(self) -> None:
+        series, warns = dataio.build_series(self.tables, self.xmap)
+        self.series_list = series
+        keys = [s.key for s in series]
+        self.checked &= set(keys)
+
+        st = self.style
+        st.xaxis.label = self.xmap.x_axis_label()
+        st.yaxis.label = self.xmap.y_axis_label()
+        try:
+            self._rebuild_axis_tab()
+        except Exception:                        # 界面还没建好时忽略
+            pass
+
+        self._fill_tree()
+        if not self.checked and series:
+            if len(self.groups) > 1:
+                self.checked = {ks[0] for ks in self.groups.values() if ks}
+            else:
+                self.checked = set(keys)
+        self._sync_tree()
+        self._refresh_series_tab()
+        self.schedule_render(0)
+        self._update_size_hint()
+
+        warn = (warns + self._scan_warnings)[0] if (warns or self._scan_warnings) else ""
+        extra = f" · {warn}" if warn else ""
+        if series:
+            self.status_var.set(
+                f"已载入 {len(series)} 条曲线（{len(self.groups)} 个数据源），"
+                f"当前显示 {len(self.checked)} 条 · "
+                f"X={V.kind(self.xmap.x_kind).label} / Y={V.kind(self.xmap.y_kind).label}{extra}")
+        else:
+            self.status_var.set(warn or "没有可绘制的曲线")
+
+    def _fill_tree(self) -> None:
+        cur = {self._iid_group[i] for i in self.tree.get_children()
+               if i in self._iid_group and self.tree.item(i, "open")}
         self.tree.delete(*self.tree.get_children())
         self._iid_key.clear()
         self._iid_group.clear()
         self.groups.clear()
-
         for s in self.series_list:
             self.groups.setdefault(s.group or s.label, []).append(s.key)
         self.style.ensure_series([s.key for s in self.series_list],
                                  {s.key: s.label for s in self.series_list})
-
         for gname, keys in self.groups.items():
             gid = f"g::{gname}"
             self._iid_group[gid] = gname
-            self.tree.insert("", "end", iid=gid, text=gname, open=True,
+            self.tree.insert("", "end", iid=gid, text=gname,
+                             open=(gname in cur) if cur else True,
                              values=(PARTIAL, f"{len(keys)} 条", ""), tags=("group",))
             for key in keys:
-                s = next(x for x in self.series_list if x.key == key)
+                s = next((x for x in self.series_list if x.key == key), None)
+                if s is None:
+                    continue
                 iid = f"k::{key}"
                 self._iid_key[iid] = key
                 self.tree.insert(gid, "end", iid=iid, text="",
                                  values=(UNCHECKED, s.label, f"{s.y_max:.0f}"), tags=("curve",))
         self.tree.tag_configure("group", font=(UI_FONT, 9, "bold"))
-
-        if len(self.groups) > 1:
-            # 多个数据源（多种样品 / 多组测试）时，每组默认只勾 1 条，方便直接对比
-            self.checked = {keys[0] for keys in self.groups.values() if keys}
-        else:
-            self.checked = {s.key for s in self.series_list}
-        self._sync_tree()
-
-        n_group = len(self.groups)
-        extra = f" · {res.warnings[0]}" if getattr(res, "warnings", None) else ""
-        self.status_var.set(f"已载入 {len(self.series_list)} 条曲线（{n_group} 个数据源），"
-                            f"当前显示 {len(self.checked)} 条"
-                            f"（每组各 1 条，点组名可整组开关）{extra}")
-        self._refresh_series_tab()
-        self.schedule_render(0)
-        self._update_size_hint()
 
     def _sync_tree(self) -> None:
         for iid, key in self._iid_key.items():
@@ -991,7 +1264,7 @@ class App(tk.Tk):
                 pass
         self._render_job = self.after(delay, self.render_preview)
 
-    def _make_figure(self):
+    def _make_figure(self, max_points: int | None = None):
         st = self.style
         ps = []
         for s in self.series_list:
@@ -1003,6 +1276,8 @@ class App(tk.Tk):
             x, y = s.x, s.y
             if getattr(ss, "smooth", 0) and int(ss.smooth) > 1:
                 x, y = render.smooth_xy(x, y, int(ss.smooth))
+            if max_points:
+                x, y = render.decimate_xy(x, y, max_points)
             ps.append(render.PlotSeries(ss.label or s.label, ss.color, ss.width, ss.style,
                                         ss.alpha, x, y, ss.marker, ss.marker_size))
         return render.Figure(st, ps, title=st.figure.title)
@@ -1024,8 +1299,9 @@ class App(tk.Tk):
         if self.preview_quality.get() == "精细":
             dpi *= 2.0
         dpi = max(30.0, dpi)
+        budget = 20000 if self.preview_quality.get() == "精细" else max(1200, int(cw * 2.5))
         try:
-            img = render.render_image(self._make_figure(), dpi=dpi)
+            img = render.render_image(self._make_figure(max_points=budget), dpi=dpi)
         except Exception as exc:            # pragma: no cover
             self.status_var.set(f"渲染失败：{exc}")
             traceback.print_exc()

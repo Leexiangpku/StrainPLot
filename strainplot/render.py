@@ -100,16 +100,25 @@ def get_font(family: str, size_px: float, bold: bool = False, italic: bool = Fal
 
 _MEASURE_SCALE = 8.0  # 用于测量文字尺寸的每 pt 像素数
 COL_GAP = 12.0        # 图例多列时的列间距（pt）
+_SIZE_CACHE: dict[tuple, tuple[float, float]] = {}
 
 
 def text_size_pt(s: str, size_pt: float, bold: bool, italic: bool, family: str) -> tuple[float, float]:
     """返回文字在版面坐标（pt）下的 (宽, 高)。"""
     if not s:
         return 0.0, 0.0
+    key = (s, round(size_pt, 3), bool(bold), bool(italic), family)
+    hit = _SIZE_CACHE.get(key)
+    if hit is not None:
+        return hit
     f = get_font(family, size_pt * _MEASURE_SCALE, bold, italic)
     w = f.getlength(s) / _MEASURE_SCALE
     asc, desc = f.getmetrics()
-    return w, (asc + desc) / _MEASURE_SCALE
+    out = (w, (asc + desc) / _MEASURE_SCALE)
+    if len(_SIZE_CACHE) > 4096:
+        _SIZE_CACHE.clear()
+    _SIZE_CACHE[key] = out
+    return out
 
 
 def text_ascent_pt(size_pt: float, bold: bool, italic: bool, family: str) -> float:
@@ -630,6 +639,36 @@ def smooth_xy(x: np.ndarray, y: np.ndarray, window: int) -> tuple[np.ndarray, np
     yy = np.pad(y, pad, mode="edge")
     ys = np.convolve(yy, kernel, mode="valid")
     return x, ys
+
+
+def decimate_xy(x: np.ndarray, y: np.ndarray,
+                max_points: int = 3000) -> tuple[np.ndarray, np.ndarray]:
+    """按桶保留极值的降采样：预览时把上万点的曲线压到 ~``max_points``，形状不变。
+
+    每个桶保留首尾与 y 的最小/最大点，因此尖峰、断裂骤降都不会被抹掉；
+    点数不足时原样返回。导出时仍使用全量数据。
+    """
+    n = int(x.size)
+    if max_points <= 16 or n <= max_points:
+        return x, y
+    try:
+        buckets = max(1, int(max_points) // 4)
+        edges = np.linspace(0, n, buckets + 1).astype(int)
+        keep: list[int] = [0]
+        ys = np.asarray(y, float)
+        for b in range(buckets):
+            s, e = int(edges[b]), int(edges[b + 1])
+            if e <= s:
+                continue
+            seg = ys[s:e]
+            keep.extend((s, s + int(np.argmin(seg)), s + int(np.argmax(seg)), e - 1))
+        keep.append(n - 1)
+        idx = np.unique(np.asarray(keep, dtype=np.int64))
+        idx = idx[(idx >= 0) & (idx < n)]
+        return x[idx], y[idx]
+    except Exception:                                    # noqa: BLE001
+        step = max(1, n // max_points)
+        return x[::step], y[::step]
 
 
 class Figure:
