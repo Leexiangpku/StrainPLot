@@ -25,7 +25,6 @@ SLOT_COUNT = 5
 SLOTS_FILE = os.environ.get("STRAINPLOT_PRESETS") or os.path.join(CONFIG_DIR, "presets.json")
 
 # 第 1 个槽位的出厂值：就是这套程序原本的用途
-FACTORY_NAME = "拉伸 · 应变–应力"
 FACTORY_X, FACTORY_Y = "strain", "stress"
 
 
@@ -53,13 +52,18 @@ class Slot:
         return bool(self.x_col or self.y_col)
 
     def display(self) -> str:
+        """界面上的默认名称：一律用**表头原文**，不翻译。
+
+        优先显示保存时记下的列名（就是文件第一行那句话）；只有按量类型存的旧预设
+        才退回"列名未知"，由界面结合当前文件夹再补全。
+        """
         if self.is_blank():
-            return "（空）"
+            return "（空置）"
         if self.name:
             return self.name
-        if self.is_custom():
-            return f"{self.x_col or 'X'} – {self.y_col or 'Y'}"
-        return f"{V.kind(self.x_kind).label} – {V.kind(self.y_kind).label}"
+        if self.x_col or self.y_col:
+            return f"{self.x_col or '?'} → {self.y_col or '?'}"
+        return "（列名未知）"
 
     # ---- 与 XYMap 互转 -----------------------------------------------------
     def to_xymap(self) -> XYMap:
@@ -128,8 +132,8 @@ class Slot:
 
 
 def factory_slots() -> list[Slot]:
-    """出厂预设：第 1 个是应力–应变，其余 4 个空白。"""
-    slots = [Slot(name=FACTORY_NAME, x_kind=FACTORY_X, y_kind=FACTORY_Y)]
+    """出厂预设：第 1 个是应力–应变（按量类型存，换文件夹也能命中），其余 4 个空白。"""
+    slots = [Slot(x_kind=FACTORY_X, y_kind=FACTORY_Y)]
     slots += [Slot() for _ in range(SLOT_COUNT - 1)]
     return slots
 

@@ -123,14 +123,9 @@ class App(tk.Tk):
         if not self.slots[0].is_blank():
             self.xmap = self.slots[0].to_xymap()
         self._col_catalog: list[tuple[str, str, str]] = []
-        self._col_by_label: dict[str, str] = {}
-        self._label_by_col: dict[str, str] = {}
         self._scan_warnings: list[str] = []
         self._scan_skipped: list[str] = []
         self.xy_preset_var = tk.StringVar(value=presets.slot_label(0, self.slots[0]))
-        self.xkind_var = tk.StringVar()
-        self.ykind_var = tk.StringVar()
-        self.custom_var = tk.BooleanVar(value=False)
         self.xcol_var = tk.StringVar()
         self.ycol_var = tk.StringVar()
         self.path_var = tk.StringVar(value=self._default_folder())
@@ -418,7 +413,15 @@ class App(tk.Tk):
     # 变量页（v2 核心）
     # ------------------------------------------------------------------ #
     def _slot_label(self, i: int) -> str:
-        return presets.slot_label(i, self.slots[i])
+        """槽位在界面上的名字：一律写表头原文；按量类型存的旧槽位用当前文件夹补全。"""
+        s = self.slots[i]
+        if s.is_blank():
+            return f"{i + 1} · （空置）"
+        if s.name:
+            return f"{i + 1} · {s.name}"
+        x = s.x_col or self._first_col_of_kind(s.x_kind) or "?"
+        y = s.y_col or self._first_col_of_kind(s.y_kind) or "?"
+        return f"{i + 1} · {x} → {y}"
 
     def _refresh_slot_box(self) -> None:
         self.preset_box.configure(values=[self._slot_label(i) for i in range(presets.SLOT_COUNT)])
@@ -453,18 +456,20 @@ class App(tk.Tk):
                    command=self._reset_slots).pack(side="left", padx=4)
 
         self._kind_labels = [f"{k.label}  {k.desc}" for k in V.KINDS]
-        self._kind_by_label = {lbl: k.id for lbl, k in zip(self._kind_labels, V.KINDS)}
-        self._label_by_kind = {k.id: lbl for lbl, k in zip(self._kind_labels, V.KINDS)}
 
         for axis in ("x", "y"):
             self._sep(tab, f"{'X 轴' if axis == 'x' else 'Y 轴'}变量")
-            var = self.xkind_var if axis == "x" else self.ykind_var
+            var = self.xcol_var if axis == "x" else self.ycol_var
             box = ttk.Combobox(tab, textvariable=var, state="readonly",
-                               values=self._kind_labels, width=30)
+                               values=[], width=30)
             box.pack(fill="x", padx=8, pady=2)
             box.bind("<<ComboboxSelected>>",
-                     lambda _e, a=axis: self._on_kind(a))
-            ent = ttk.Entry(tab)
+                     lambda _e, a=axis: self._on_col_axis(a))
+            if axis == "x":
+                self.xcol_box = box
+            else:
+                self.ycol_box = box
+
             row = ttk.Frame(tab)
             row.pack(fill="x", padx=8, pady=2)
             ttk.Label(row, text="单位", width=5).pack(side="left")
@@ -481,7 +486,7 @@ class App(tk.Tk):
             row2.pack(fill="x", padx=8, pady=2)
             ttk.Label(row2, text="轴标题", width=5).pack(side="left")
             lent = ttk.Entry(row2, width=22)
-            lent.pack(side="left", fill="x", expand=True)
+            lent.pack(side="left", fill="x", expand=True, padx=(4, 0))
             lent.bind("<Return>", lambda _e, a=axis, w=lent: self._on_label(a, w.get()))
             lent.bind("<FocusOut>", lambda _e, a=axis, w=lent: self._on_label(a, w.get()))
             if axis == "x":
@@ -496,20 +501,6 @@ class App(tk.Tk):
         ttk.Button(act, text="重载当前预设", width=12,
                    command=self._on_slot).pack(side="left", padx=6)
 
-        self._sep(tab, "自定义两列")
-        ttk.Checkbutton(tab, text="不按类型，直接指定列", variable=self.custom_var,
-                        command=self._on_custom_toggle).pack(anchor="w", padx=8)
-        self.custom_box = ttk.Frame(tab)
-        self.custom_box.pack(fill="x", padx=8)
-        for axis, var in (("x", self.xcol_var), ("y", self.ycol_var)):
-            row = ttk.Frame(self.custom_box)
-            row.pack(fill="x", pady=2)
-            ttk.Label(row, text=("X 列" if axis == "x" else "Y 列"), width=5).pack(side="left")
-            cb = ttk.Combobox(row, textvariable=var, state="readonly", width=26)
-            cb.pack(side="left", fill="x", expand=True)
-            cb.bind("<<ComboboxSelected>>", lambda _e, a=axis: self._on_custom_col(a))
-        self._set_custom_state()
-
         self._sep(tab, "检测到的列")
         self.col_hint = ttk.Label(tab, text="（扫描后显示）", style="Hint.TLabel",
                                   justify="left", wraplength=290)
@@ -518,23 +509,16 @@ class App(tk.Tk):
         self._sync_var_widgets()
 
     # ---- 变量页事件 ----
-    def _set_custom_state(self) -> None:
-        state = "readonly" if self.custom_var.get() else "disabled"
-        for child in self.custom_box.winfo_children():
-            for sub in child.winfo_children():
-                if isinstance(sub, ttk.Combobox):
-                    sub.configure(state=state)
-
     def _on_slot(self) -> None:
         """把当前选中槽位的映射套到界面上。"""
         self.slot_index = self._slot_index_from_label(self.xy_preset_var.get())
         slot = self.slots[self.slot_index]
         if slot.is_blank():
-            self.preset_note.configure(text="空预设：选好 X/Y（或自定义两列）后点「保存到预设」")
+            self.preset_note.configure(text="空预设：选好 X/Y 后点「保存到预设」")
             self._refresh_slot_box()
             return
         self.xmap = slot.to_xymap()
-        self.custom_var.set(slot.is_custom())
+        self._resolve_columns()
         self._sync_var_widgets()
         self._apply_mapping()
 
@@ -549,12 +533,9 @@ class App(tk.Tk):
 
     def _save_slot(self) -> None:
         i = self.slot_index
-        name = self.slots[i].name
-        self.slots[i] = presets.Slot.from_xymap(self.xmap, name=name)
-        if not name:
-            self.slots[i].name = self.slots[i].display()
+        self.slots[i] = presets.Slot.from_xymap(self.xmap, name=self.slots[i].name)
         self._refresh_slot_box()
-        self.preset_note.configure(text=f"已保存到预设 {i + 1} · {self.slots[i].display()}")
+        self.preset_note.configure(text=f"已保存到预设 {i + 1}：{self.slots[i].display()}")
         try:
             presets.save(self.slots)
             self.status_var.set(f"已保存读取方式到预设 {i + 1}")
@@ -601,15 +582,19 @@ class App(tk.Tk):
         self._refresh_slot_box()
         self._on_slot()
 
-    def _on_kind(self, axis: str) -> None:
-        var = self.xkind_var if axis == "x" else self.ykind_var
-        kid = self._kind_by_label.get(var.get(), "plain")
+    def _on_col_axis(self, axis: str) -> None:
+        """下拉框选的是**表头原文**，直接当作列名。"""
+        var = self.xcol_var if axis == "x" else self.ycol_var
+        key = var.get().strip()
+        kind = self._kind_of_col(key)
         if axis == "x":
-            self.xmap.x_kind, self.xmap.x_col, self.xmap.x_label = kid, "", ""
-            self.xcol_var.set("")
+            self.xmap.x_col, self.xmap.x_kind = key, kind
+            self.xmap.x_label = self._col_title(key)
         else:
-            self.xmap.y_kind, self.xmap.y_col, self.xmap.y_label = kid, "", ""
-            self.ycol_var.set("")
+            self.xmap.y_col, self.xmap.y_kind = key, kind
+            self.xmap.y_label = self._col_title(key)
+        self._resolve_columns()
+        self._sync_var_widgets()
         self._apply_mapping()
 
     def _on_unit(self, axis: str, text: str) -> None:
@@ -643,29 +628,47 @@ class App(tk.Tk):
                     return f"{header} ({u})" if u else header
         return header
 
-    def _on_custom_toggle(self) -> None:
-        self._set_custom_state()
-        if self.custom_var.get():
-            self.xmap.x_col = self._col_by_label.get(self.xcol_var.get(), "")
-            self.xmap.y_col = self._col_by_label.get(self.ycol_var.get(), "")
-        else:
-            self.xmap.x_col = self.xmap.y_col = ""
-        self._apply_mapping()
+    def _kind_of_col(self, header: str) -> str:
+        """查一个表头对应的量类型；认不出返回 "plain"。"""
+        for t in self.tables:
+            for c in t.columns:
+                if (c.header or "").strip() == header and c.kind:
+                    return c.kind
+        return "plain"
 
-    def _on_custom_col(self, axis: str) -> None:
-        var = self.xcol_var if axis == "x" else self.ycol_var
-        key = self._col_by_label.get(var.get(), "")
-        if axis == "x":
-            self.xmap.x_col = key
-            if key:
-                self.xmap.x_label = self._col_title(key)
-        else:
-            self.xmap.y_col = key
-            if key:
-                self.xmap.y_label = self._col_title(key)
-        self.custom_var.set(True)
-        self._set_custom_state()
-        self._apply_mapping()
+    def _first_col_of_kind(self, kind: str) -> str:
+        """按量类型找第一个满足条件的表头（预设跨文件夹复用用）。"""
+        if not kind or kind == "plain":
+            return ""
+        for t in self.tables:
+            for c in t.columns:
+                if c.kind == kind and (c.header or "").strip():
+                    return c.header.strip()
+        return ""
+
+    def _resolve_columns(self) -> None:
+        """把 xmap 的列落实成当前文件夹里真正存在的表头。
+
+        预设可能是按「量类型」存的（换文件夹后表头变了），也可能是按旧表头存的，
+        这里统一解析一次，界面上永远显示文件里的原文。
+        """
+        heads = {c[0] for c in self._col_catalog}
+        m = self.xmap
+        for attr_col, attr_kind, attr_label in (("x_col", "x_kind", "x_label"),
+                                                ("y_col", "y_kind", "y_label")):
+            col = getattr(m, attr_col).strip()
+            kind = getattr(m, attr_kind)
+            if col and col in heads:
+                if not kind or kind == "plain":
+                    setattr(m, attr_kind, self._kind_of_col(col))
+                if not getattr(m, attr_label):
+                    setattr(m, attr_label, self._col_title(col))
+                continue
+            alt = col if col in heads else self._first_col_of_kind(kind)
+            if alt:
+                setattr(m, attr_col, alt)
+                setattr(m, attr_kind, self._kind_of_col(alt))
+                setattr(m, attr_label, self._col_title(alt))
 
     def swap_xy(self) -> None:
         self.xmap = self.xmap.swapped()
@@ -675,9 +678,6 @@ class App(tk.Tk):
     def _sync_var_widgets(self) -> None:
         """把 xmap 的当前状态写回界面控件。"""
         m = self.xmap
-        self.xkind_var.set(self._label_by_kind.get(m.x_kind, self._kind_labels[0]))
-        self.ykind_var.set(self._label_by_kind.get(m.y_kind, self._kind_labels[0]))
-        kx, ky = V.kind(m.x_kind), V.kind(m.y_kind)
         self.xunit_entry.delete(0, "end")
         self.xunit_entry.insert(0, "" if m.x_unit is None else m.x_unit)
         self.yunit_entry.delete(0, "end")
@@ -686,14 +686,19 @@ class App(tk.Tk):
         self.xlabel_entry.insert(0, m.x_label)
         self.ylabel_entry.delete(0, "end")
         self.ylabel_entry.insert(0, m.y_label)
-        if m.x_col or m.y_col:
-            note = f"自定义列：{m.x_col or '—'} → {m.y_col or '—'}"
-        else:
-            note = f"{kx.label} → {ky.label}"
-        self.preset_note.configure(text=note)
-        self.xcol_var.set(self._label_by_col.get(m.x_col, m.x_col))
-        self.ycol_var.set(self._label_by_col.get(m.y_col, m.y_col))
-        self._set_custom_state()
+        self.xcol_var.set(m.x_col)
+        self.ycol_var.set(m.y_col)
+        self._update_preset_note()
+
+    def _update_preset_note(self) -> None:
+        m = self.xmap
+        if not (m.x_col or m.y_col):
+            self.preset_note.configure(
+                text="还没选列 —— 在下面选好 X / Y（表头原文），或选一个预设")
+            return
+        self.preset_note.configure(
+            text=(f"取列：{m.x_col or '—'} → {m.y_col or '—'}\n"
+                  f"绘图轴标题：{self.xmap.x_axis_label()} / {self.xmap.y_axis_label()}"))
 
     # ------------------------------------------------------------------ #
     # 配色页
@@ -1190,27 +1195,33 @@ class App(tk.Tk):
         self._rebuild_series()
 
     def _refresh_col_catalog(self) -> None:
-        values = [c[1] for c in self._col_catalog]
-        mapping = {c[1]: c[0] for c in self._col_catalog}
-        self._col_by_label = mapping
-        self._label_by_col = {c[0]: c[1] for c in self._col_catalog}
-        for child in self.custom_box.winfo_children():
-            for sub in child.winfo_children():
-                if isinstance(sub, ttk.Combobox):
-                    sub.configure(values=values)
-        if self.tables:
-            kinds = {}
-            for t in self.tables:
-                for c in t.columns:
-                    if c.index in t.data:
-                        kinds[c.kind] = kinds.get(c.kind, 0) + 1
-            top = sorted(kinds.items(), key=lambda kv: -kv[1])[:6]
-            lines = [f"· {V.kind(k).label}：{n} 列" for k, n in top]
-            self.col_hint.configure(
-                text=(f"{len(self.tables)} 个数据表，第一行共 {len(values)} 个列名\n"
-                      + "\n".join(lines)))
-        else:
+        values = [c[0] for c in self._col_catalog]
+        for box in (getattr(self, "xcol_box", None), getattr(self, "ycol_box", None)):
+            if box is not None:
+                box.configure(values=values)
+        if not self._col_catalog:
             self.col_hint.configure(text="（没有扫描到可绘制的数值列）")
+            return
+        cnt: dict[str, int] = {}
+        for t in self.tables:
+            for c in t.columns:
+                if c.index in t.data:
+                    h = (c.header or "").strip()
+                    if h:
+                        cnt[h] = cnt.get(h, 0) + 1
+        lines = [f"· {head} × {cnt.get(head, 1)}" for head, _lbl, _k in self._col_catalog]
+        if len(lines) > 14:
+            lines = lines[:14] + [f"… 还有 {len(self._col_catalog) - 14} 个列名"]
+        self.col_hint.configure(
+            text=(f"{len(self.tables)} 个数据表，第一行共 {len(self._col_catalog)} 个列名\n"
+                  + "\n".join(lines)))
+        # 预设里的「量类型」按当前文件夹落实成真实表头，再把槽位名刷新成原文
+        self._resolve_columns()
+        try:
+            self._refresh_slot_box()
+            self._sync_var_widgets()
+        except Exception:                        # noqa: BLE001
+            pass
 
     def _apply_mapping(self) -> None:
         """X/Y 映射变了：同步轴标题、刷新曲线（不重新读文件）。"""

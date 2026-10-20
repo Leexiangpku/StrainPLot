@@ -36,6 +36,27 @@ from . import variables as V
 TEXT_EXT = {".csv", ".txt", ".dat", ".tsv"}
 EXCEL_EXT = {".xlsx", ".xlsm"}
 SKIP_DIR_HINTS = ("__macosx",)
+
+# 文件名里带这些词的通常是手工复制出来的副本，会重复计数（"Specimen_RawData_5 - 副本.csv"）
+COPY_HINTS = ("副本", "copy", "backup", "备份", "- 副")
+
+# 只认这些"纯单位"字符串，避免把 `(%)`、`(kPa)`、`\` 当成列名显示在界面上
+_UNIT_WORDS = {
+    "%", "‰", "s", "ms", "min", "h", "hour", "mm", "cm", "m", "nm", "um", "μm", "°c", "c", "k",
+    "n", "kn", "g", "mg", "kg", "ml", "l", "μl", "ul", "v", "mv", "kv", "ma", "a", "ω", "ohm",
+    "hz", "khz", "mhz", "ppm", "kpa", "mpa", "gpa", "pa", "bar", "psi", "mol/l", "mmol/l",
+    "wt%", "vol%", "a.u.", "au", "deg", "°", "1/s", "rad/s", "ph", "-", "\\", "kpa/s", "mm/min",
+    "mm/s", "n/m", "mj/m3", "mj/m³", "j/g", "w/g", "eu", "counts", "cps",
+}
+
+
+def _looks_like_unit(text: str) -> bool:
+    """这一格更像单位而不是列名（`(%)`、`kPa`、`\\` 之类）。"""
+    s = (text or "").strip()
+    if not s:
+        return True
+    core = s.strip("()[] ").strip().lower()
+    return core in _UNIT_WORDS
 _UNIT_RE = re.compile(r"^\(?\s*[%a-zA-Zμµ°²³⁻¹/·\.\d]+\s*\)?$")
 
 
@@ -723,6 +744,9 @@ def scan_tables(root: str, prefer: str = "auto", recursive: bool = True,
             if any(tag in name for tag in ("results", "summary", "汇总")):
                 res.skipped.append(f"{os.path.basename(f)}: 统计汇总表，已跳过")
                 continue
+            if any(tag in name for tag in COPY_HINTS):
+                res.skipped.append(f"{os.path.basename(f)}: 文件名含「副本/copy」，已跳过")
+                continue
             try:
                 for t in _load_file(f):
                     biggest = max((len(v) for v in t.data.values()), default=0)
@@ -776,7 +800,7 @@ def column_catalog(tables: Iterable[Table]) -> list[tuple[str, str, str]]:
             if c.index not in t.data:
                 continue
             head = (c.header or "").strip()
-            if not head:
+            if not head or _looks_like_unit(head):
                 continue
             rec = counter.get(head)
             counter[head] = (rec[0] + 1 if rec else 1, c)
