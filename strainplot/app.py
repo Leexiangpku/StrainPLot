@@ -15,7 +15,7 @@ from tkinter import font as tkfont
 import numpy as np
 from PIL import Image, ImageTk
 
-from . import dataio, palettes, render
+from . import dataio, palettes, presets, render
 from . import variables as V
 from .style import CONFIG_DIR, PRESETS, Style, reference_style
 
@@ -69,6 +69,17 @@ def _fmt(v) -> str:
     return f"{f:g}"
 
 
+def _fmt_num(v) -> str:
+    """列表里「最大值」的显示：4 位有效数字，去掉多余的 0（1581 / 108.2 / 0.649）。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if not np.isfinite(f):
+        return "—"
+    return f"{f:.4g}"
+
+
 # --------------------------------------------------------------------------- #
 # 画布尺寸预设（第一项与 Origin 导出参考图完全一致：4×3 in @600dpi = 2400×1800）
 # --------------------------------------------------------------------------- #
@@ -106,13 +117,17 @@ class App(tk.Tk):
         self._axis_side = tk.StringVar(value="X")
         self._unidir = tk.StringVar(value="in")
         self.tables: list[dataio.Table] = []
+        self.slots: list[presets.Slot] = presets.load()
+        self.slot_index = 0
         self.xmap = dataio.XYMap()
+        if not self.slots[0].is_blank():
+            self.xmap = self.slots[0].to_xymap()
         self._col_catalog: list[tuple[str, str, str]] = []
         self._col_by_label: dict[str, str] = {}
         self._label_by_col: dict[str, str] = {}
         self._scan_warnings: list[str] = []
         self._scan_skipped: list[str] = []
-        self.xy_preset_var = tk.StringVar(value=self._preset_label("tensile"))
+        self.xy_preset_var = tk.StringVar(value=presets.slot_label(0, self.slots[0]))
         self.xkind_var = tk.StringVar()
         self.ykind_var = tk.StringVar()
         self.custom_var = tk.BooleanVar(value=False)
@@ -230,7 +245,7 @@ class App(tk.Tk):
         self.tree.column("#0", width=104, minwidth=60, stretch=False)
         self.tree.column("show", width=30, minwidth=26, anchor="center", stretch=False)
         self.tree.column("curve", width=98, minwidth=70, anchor="w")
-        self.tree.column("info", width=58, minwidth=46, anchor="e", stretch=False)
+        self.tree.column("info", width=66, minwidth=50, anchor="e", stretch=False)
         sb = ttk.Scrollbar(holder, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -402,25 +417,40 @@ class App(tk.Tk):
     # ------------------------------------------------------------------ #
     # 变量页（v2 核心）
     # ------------------------------------------------------------------ #
-    @staticmethod
-    def _preset_label(pid: str) -> str:
-        p = V.PRESET_BY_ID.get(pid, V.PRESET_BY_ID[V.DEFAULT_PRESET])
-        return f"{p.group} / {p.name}"
+    def _slot_label(self, i: int) -> str:
+        return presets.slot_label(i, self.slots[i])
+
+    def _refresh_slot_box(self) -> None:
+        self.preset_box.configure(values=[self._slot_label(i) for i in range(presets.SLOT_COUNT)])
+        self.xy_preset_var.set(self._slot_label(self.slot_index))
 
     def _build_variable_tab(self) -> None:
         tab = self.tab_var.body
         ttk.Label(tab, text="画哪两列（X → Y）", style="Head.TLabel").pack(
             anchor="w", padx=8, pady=(8, 0))
-        ttk.Label(tab, text="选一个常见组合，或自定义任意两列；换变量不会重新读文件",
+        ttk.Label(tab, text="5 个预设槽位，可改、可存、可清空；换变量不会重新读文件",
                   style="Hint.TLabel").pack(anchor="w", padx=8, pady=(0, 4))
 
-        ttk.Label(tab, text="组合预设", style="Head.TLabel").pack(anchor="w", padx=8, pady=(6, 0))
+        ttk.Label(tab, text="读取方式预设", style="Head.TLabel").pack(anchor="w", padx=8, pady=(6, 0))
         self.preset_box = ttk.Combobox(tab, textvariable=self.xy_preset_var, state="readonly",
-                                       values=V.preset_labels(), width=30)
+                                       values=[self._slot_label(i) for i in range(presets.SLOT_COUNT)],
+                                       width=30)
         self.preset_box.pack(fill="x", padx=8, pady=(2, 0))
-        self.preset_box.bind("<<ComboboxSelected>>", lambda _e: self._on_preset())
-        self.preset_note = ttk.Label(tab, text="", style="Hint.TLabel")
+        self.preset_box.bind("<<ComboboxSelected>>", lambda _e: self._on_slot())
+        self.preset_note = ttk.Label(tab, text="", style="Hint.TLabel", wraplength=290,
+                                    justify="left")
         self.preset_note.pack(anchor="w", padx=8)
+
+        srow = ttk.Frame(tab)
+        srow.pack(fill="x", padx=8, pady=(4, 2))
+        ttk.Button(srow, text="保存到预设", width=10,
+                   command=self._save_slot).pack(side="left")
+        ttk.Button(srow, text="重命名", width=7,
+                   command=self._rename_slot).pack(side="left", padx=4)
+        ttk.Button(srow, text="清空", width=6,
+                   command=self._clear_slot).pack(side="left")
+        ttk.Button(srow, text="恢复默认", width=8,
+                   command=self._reset_slots).pack(side="left", padx=4)
 
         self._kind_labels = [f"{k.label}  {k.desc}" for k in V.KINDS]
         self._kind_by_label = {lbl: k.id for lbl, k in zip(self._kind_labels, V.KINDS)}
@@ -463,8 +493,8 @@ class App(tk.Tk):
         act.pack(fill="x", padx=8, pady=(8, 2))
         ttk.Button(act, text="⇄  反转 X–Y", width=14,
                    command=self.swap_xy).pack(side="left")
-        ttk.Button(act, text="按预设重置", width=12,
-                   command=lambda: self._on_preset(force=True)).pack(side="left", padx=6)
+        ttk.Button(act, text="重载当前预设", width=12,
+                   command=self._on_slot).pack(side="left", padx=6)
 
         self._sep(tab, "自定义两列")
         ttk.Checkbutton(tab, text="不按类型，直接指定列", variable=self.custom_var,
@@ -495,19 +525,81 @@ class App(tk.Tk):
                 if isinstance(sub, ttk.Combobox):
                     sub.configure(state=state)
 
-    def _on_preset(self, force: bool = False) -> None:
-        p = V.preset_from_label(self.xy_preset_var.get())
-        self.xmap.x_kind, self.xmap.y_kind = p.x, p.y
-        self.xmap.x_label = self.xmap.y_label = ""
-        self.xmap.x_unit = self.xmap.y_unit = None
-        self.custom_var.set(p.id == "custom")
-        if p.id != "custom":
-            self.xmap.x_col = self.xmap.y_col = ""
-            self.xcol_var.set("")
-            self.ycol_var.set("")
+    def _on_slot(self) -> None:
+        """把当前选中槽位的映射套到界面上。"""
+        self.slot_index = self._slot_index_from_label(self.xy_preset_var.get())
+        slot = self.slots[self.slot_index]
+        if slot.is_blank():
+            self.preset_note.configure(text="空预设：选好 X/Y（或自定义两列）后点「保存到预设」")
+            self._refresh_slot_box()
+            return
+        self.xmap = slot.to_xymap()
+        self.custom_var.set(slot.is_custom())
         self._sync_var_widgets()
-        self.preset_note.configure(text=p.note)
         self._apply_mapping()
+
+    def _slot_index_from_label(self, label: str) -> int:
+        for i in range(len(self.slots)):
+            if self._slot_label(i) == label:
+                return i
+        for i in range(len(self.slots)):
+            if label.startswith(f"{i + 1} · "):
+                return i
+        return 0
+
+    def _save_slot(self) -> None:
+        i = self.slot_index
+        name = self.slots[i].name
+        self.slots[i] = presets.Slot.from_xymap(self.xmap, name=name)
+        if not name:
+            self.slots[i].name = self.slots[i].display()
+        self._refresh_slot_box()
+        self.preset_note.configure(text=f"已保存到预设 {i + 1} · {self.slots[i].display()}")
+        try:
+            presets.save(self.slots)
+            self.status_var.set(f"已保存读取方式到预设 {i + 1}")
+        except Exception as exc:                     # noqa: BLE001
+            self.status_var.set(f"预设已生效，但写入磁盘失败：{exc}")
+
+    def _rename_slot(self) -> None:
+        from tkinter import simpledialog
+
+        i = self.slot_index
+        cur = self.slots[i].name or self.slots[i].display()
+        name = simpledialog.askstring("重命名预设", f"预设 {i + 1} 的名称：", initialvalue=cur,
+                                      parent=self)
+        if name is None:
+            return
+        self.slots[i].name = name.strip()
+        try:
+            presets.save(self.slots)
+        except Exception:                            # noqa: BLE001
+            pass
+        self._refresh_slot_box()
+
+    def _clear_slot(self) -> None:
+        i = self.slot_index
+        self.slots[i] = presets.Slot()
+        try:
+            presets.save(self.slots)
+        except Exception:                            # noqa: BLE001
+            pass
+        self._refresh_slot_box()
+        self.preset_note.configure(text=f"预设 {i + 1} 已清空")
+
+    def _reset_slots(self) -> None:
+        if not messagebox.askyesno("恢复默认预设",
+                                   "把 5 个预设恢复成出厂状态？\n（预设 1 = 拉伸应力–应变，其余为空）",
+                                   parent=self):
+            return
+        self.slots = presets.factory_slots()
+        try:
+            presets.save(self.slots)
+        except Exception:                            # noqa: BLE001
+            pass
+        self.slot_index = 0
+        self._refresh_slot_box()
+        self._on_slot()
 
     def _on_kind(self, axis: str) -> None:
         var = self.xkind_var if axis == "x" else self.ykind_var
@@ -540,14 +632,16 @@ class App(tk.Tk):
             self.xmap.y_label = text
         self._apply_mapping()
 
-    def _col_title(self, key: str) -> str:
-        """自定义列 → 轴标题（表头 + 单位）。"""
+    def _col_title(self, header: str) -> str:
+        """按表头找到列，给出轴标题：认识这个量就用英文量名，否则用表头原文。"""
         for t in self.tables:
             for c in t.columns:
-                if c.key == key:
-                    u = c.unit.strip()
-                    return f"{c.header} ({u})" if u else c.header
-        return key
+                if (c.header or "").strip() == header:
+                    if c.kind and c.kind != "plain":
+                        return V.axis_label(c.kind, c.unit or None)
+                    u = (c.unit or "").strip()
+                    return f"{header} ({u})" if u else header
+        return header
 
     def _on_custom_toggle(self) -> None:
         self._set_custom_state()
@@ -592,7 +686,11 @@ class App(tk.Tk):
         self.xlabel_entry.insert(0, m.x_label)
         self.ylabel_entry.delete(0, "end")
         self.ylabel_entry.insert(0, m.y_label)
-        self.preset_note.configure(text=f"{kx.label} → {ky.label}")
+        if m.x_col or m.y_col:
+            note = f"自定义列：{m.x_col or '—'} → {m.y_col or '—'}"
+        else:
+            note = f"{kx.label} → {ky.label}"
+        self.preset_note.configure(text=note)
         self.xcol_var.set(self._label_by_col.get(m.x_col, m.x_col))
         self.ycol_var.set(self._label_by_col.get(m.y_col, m.y_col))
         self._set_custom_state()
@@ -1109,7 +1207,8 @@ class App(tk.Tk):
             top = sorted(kinds.items(), key=lambda kv: -kv[1])[:6]
             lines = [f"· {V.kind(k).label}：{n} 列" for k, n in top]
             self.col_hint.configure(
-                text=f"{len(self.tables)} 个数据表，共 {len(values)} 种列\n" + "\n".join(lines))
+                text=(f"{len(self.tables)} 个数据表，第一行共 {len(values)} 个列名\n"
+                      + "\n".join(lines)))
         else:
             self.col_hint.configure(text="（没有扫描到可绘制的数值列）")
 
@@ -1176,7 +1275,7 @@ class App(tk.Tk):
                 iid = f"k::{key}"
                 self._iid_key[iid] = key
                 self.tree.insert(gid, "end", iid=iid, text="",
-                                 values=(UNCHECKED, s.label, f"{s.y_max:.0f}"), tags=("curve",))
+                                 values=(UNCHECKED, s.label, _fmt_num(s.y_max)), tags=("curve",))
         self.tree.tag_configure("group", font=(UI_FONT, 9, "bold"))
 
     def _sync_tree(self) -> None:

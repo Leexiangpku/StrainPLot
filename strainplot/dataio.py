@@ -765,21 +765,23 @@ def scan_folder(root: str, prefer: str = "auto", recursive: bool = True,
 
 
 def column_catalog(tables: Iterable[Table]) -> list[tuple[str, str, str]]:
-    """所有出现过的列：``(key, 显示名, 猜测类型)``，按出现次数排序，给界面下拉框用。"""
+    """所有出现过的列，只按**第一行表头**归类。
+
+    返回 ``(判据, 显示名, 猜测类型)``：判据 = 表头原文（自定义模式直接拿它去找列），
+    显示名 = 表头原文（不再附加单位/类型后缀），同一个表头只出现一次。
+    """
     counter: dict[str, tuple[int, Column]] = {}
     for t in tables:
         for c in t.columns:
             if c.index not in t.data:
                 continue
-            rec = counter.get(c.key)
-            counter[c.key] = (rec[0] + 1 if rec else 1, c)
-    items = sorted(counter.items(), key=lambda kv: (-kv[1][0], _natural_key(kv[1][1].display)))
-    out: list[tuple[str, str, str]] = []
-    for key, (cnt, col) in items:
-        kind_label = V.kind(col.kind).label if col.kind != "plain" else ""
-        hint = f"  · {kind_label}" if kind_label else ""
-        out.append((key, f"{col.display}{hint}", col.kind))
-    return out
+            head = (c.header or "").strip()
+            if not head:
+                continue
+            rec = counter.get(head)
+            counter[head] = (rec[0] + 1 if rec else 1, c)
+    items = sorted(counter.items(), key=lambda kv: (-kv[1][0], _natural_key(kv[0])))
+    return [(head, head, col.kind) for head, (cnt, col) in items]
 
 
 def folder_preview(root: str, limit: int = 400) -> list[str]:

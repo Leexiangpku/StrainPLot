@@ -1,16 +1,17 @@
-"""变量词典与常见 X–Y 组合预设
-=================================
+"""变量词典
+===========
 
-v2 起，程序不再把"应变 → 应力"写死，而是把所有可绘制的物理量抽象成 :class:`Kind`，
-每条曲线的 X / Y 从表的列里按"量类型"（kind）自动匹配，也可以自定义任意两列。
+程序不把"应变 → 应力"写死，而是把所有可绘制的物理量抽象成 :class:`Kind`，
+每条曲线的 X / Y 从表的列里按"量类型"（kind）自动匹配，也可以直接指定某两列。
 
 一个 :class:`Kind` 提供三样东西：
 
-* ``id``     内部标识（存进样式模板 JSON）
+* ``id``     内部标识（存进样式/预设 JSON）
 * ``label``  英文轴标题（Arial，全英文）
 * ``unit``   默认单位；``aliases`` 用于从表头/单位行猜测列的类型
 
-:data:`PRESETS` 收录化学 / 高分子 / 材料 / 物理里最常用的 X–Y 组合，界面里按分类分组显示。
+界面上只保留 5 个**可编辑**的读取方式预设（见 :mod:`strainplot.presets`），
+第 1 个默认是应力–应变，其余初始为空。
 """
 from __future__ import annotations
 
@@ -182,83 +183,3 @@ def _norm(text) -> str:
         s = s.replace(ch, "")
     return s
 
-
-# --------------------------------------------------------------------------- #
-# 常见组合
-# --------------------------------------------------------------------------- #
-@dataclass(frozen=True)
-class Preset:
-    id: str
-    name: str            # 界面显示（中英混排，短）
-    x: str               # X 量 kind id
-    y: str               # Y 量 kind id
-    group: str = "力学"
-    note: str = ""
-
-    @property
-    def x_label(self) -> str:
-        return kind(self.x).label
-
-    @property
-    def y_label(self) -> str:
-        return kind(self.y).label
-
-
-PRESETS: tuple[Preset, ...] = (
-    # 力学
-    Preset("tensile", "拉伸 · 应变–应力", "strain", "stress", "力学", "Instron / 万能试验机"),
-    Preset("compress", "压缩 · 位移–载荷", "displacement", "load", "力学", "压缩 / 三点弯"),
-    Preset("relax", "应力松弛 · 时间–应力", "time", "stress", "力学", "松弛 / 蠕变"),
-    Preset("creep", "蠕变 · 时间–应变", "time", "strain", "力学", "恒载蠕变"),
-    Preset("cyclic", "循环 · 时间–应力", "time", "stress", "力学", "循环加载"),
-    Preset("modulus_strain", "振幅扫描 · 应变–模量", "strain", "modulus", "力学", "应变扫描"),
-    Preset("rheology_freq", "频率扫描 · 频率–模量", "frequency", "modulus", "力学", "G′ / G″"),
-    Preset("flow_curve", "流动曲线 · 剪切速率–黏度", "shear_rate", "viscosity", "力学", "稳态剪切"),
-
-    # 热分析
-    Preset("tga", "TGA · 温度–质量", "temperature", "mass", "热分析", "失重曲线"),
-    Preset("dsc", "DSC · 温度–热流", "temperature", "heat_flow", "热分析", "熔融 / 结晶"),
-    Preset("dma", "DMA · 温度–模量", "temperature", "modulus", "热分析", "温度扫描"),
-    Preset("isothermal", "等温 · 时间–质量", "time", "mass", "热分析", "恒温失重"),
-
-    # 光谱
-    Preset("uvvis", "UV-Vis · 波长–吸光度", "wavelength", "absorbance", "光谱", "吸收光谱"),
-    Preset("uvvis_t", "UV-Vis · 波长–透过率", "wavelength", "transmittance", "光谱", "透射光谱"),
-    Preset("ftir", "FTIR · 波数–透过率", "wavenumber", "transmittance", "光谱", "红外光谱"),
-    Preset("raman", "Raman · 波数–强度", "wavenumber", "intensity", "光谱", "拉曼光谱"),
-    Preset("xrd", "XRD · 2θ–强度", "two_theta", "intensity", "光谱", "衍射谱"),
-    Preset("pl", "PL · 波长–发射强度", "wavelength", "emission", "光谱", "荧光光谱"),
-
-    # 电化学
-    Preset("cv", "CV · 电位–电流", "potential", "current", "电化学", "循环伏安"),
-    Preset("gcd", "充放电 · 时间–电压", "time", "potential", "电化学", "恒流充放电"),
-    Preset("cap_v", "充放电 · 容量–电压", "capacity", "potential", "电化学", "容量-电压"),
-    Preset("cycle_cap", "循环性能 · 圈数–容量", "cycle", "capacity", "电化学", "循环寿命"),
-    Preset("eis", "EIS · Z′–Z″", "resistance", "resistance", "电化学", "阻抗谱（需自行改名）"),
-
-    # 化学
-    Preset("beer", "标准曲线 · 浓度–吸光度", "concentration", "absorbance", "化学", "Beer–Lambert"),
-    Preset("titration", "滴定 · 体积–电位", "volume", "potential", "化学", "电位滴定"),
-    Preset("ph_cond", "pH–电导率", "ph", "conductivity", "化学", "酸碱响应"),
-    Preset("swell", "溶胀 · 时间–溶胀比", "time", "swelling", "化学", "溶胀动力学"),
-    Preset("contact", "润湿 · 浓度–接触角", "concentration", "contact_angle", "化学", "润湿性"),
-    Preset("custom", "自定义（任选两列）", "plain", "plain", "自定义", "手动指定 X / Y 列"),
-)
-
-PRESET_BY_ID: dict[str, Preset] = {p.id: p for p in PRESETS}
-PRESET_GROUPS: tuple[str, ...] = ("力学", "热分析", "光谱", "电化学", "化学", "自定义")
-
-
-def preset_labels() -> list[str]:
-    """给下拉框用的分组标签：``力学 / 拉伸 · 应变–应力``。"""
-    return [f"{p.group} / {p.name}" for p in PRESETS]
-
-
-def preset_from_label(label: str) -> Preset:
-    for p in PRESETS:
-        if label in (f"{p.group} / {p.name}", p.name):
-            return p
-    return PRESET_BY_ID["tensile"]
-
-
-DEFAULT_PRESET = "tensile"
