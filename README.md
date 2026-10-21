@@ -53,12 +53,14 @@ v2 起不再写死"应变–应力"：40 种常见物理量（力学 / 热分析
 | 系统 | 下载 | 大小 | 用法 |
 | --- | --- | --- | --- |
 | Windows 10/11 x64 | **[StrainPlot-0.20-win64.zip](https://github.com/Leexiangpku/StrainPLot/releases/download/v0.20/StrainPlot-0.20-win64.zip)** | 33 MB | 解压到任意目录（含中文、含空格都行），双击 `StrainPlot.exe` |
-| macOS 11+ (Apple Silicon / Intel) | **[Releases](https://github.com/Leexiangpku/StrainPLot/releases) → `StrainPlot-0.20-macos.zip`** | 22 MB | 解压，双击 `StrainPlot.app`（自带 Python + Tk，无需装任何东西） |
+| macOS 11+ (Apple Silicon) | **[StrainPlot-0.20-macos.zip](https://github.com/Leexiangpku/StrainPLot/releases/download/v0.20/StrainPlot-0.20-macos.zip)** | 23 MB | 解压，双击 `StrainPlot.app`（自带 Python + Tk，无需装任何东西） |
 
 > 上面两个链接指向 [Releases](https://github.com/Leexiangpku/StrainPLot/releases) 里的安装包，
 > 点一下就开始下载，不需要 git、不需要装 Python。
-> **注意**：v0.20 早期那个 109 KB 的 macOS 包是"启动器"方案，在新版 macOS 上必崩，已作废；
-> 换成自带运行时的包（约 22 MB），没找到就用下面的 `build_macos.sh` 自己打一个。
+> **注意**：v0.20 早期那个 109 KB 的 macOS 包是"启动器"方案（依赖本机 Python 的 Tk 8.5），
+> 在 macOS 14+ 上一打开就崩，已经从 Release 里删掉并换成自带运行时的 23 MB 包。
+> Intel Mac 请在 macOS 上执行一次 `./packaging/macos/build_macos.sh`——脚本会按 `uname -m` 自动选 x86_64 运行时，
+> PyInstaller 不能跨架构编译，所以 Intel 版的包只能在 Intel（或 Rosetta 环境）里打。
 > 版本号（`0.20`）只有一个来源：`strainplot/__init__.py` 里的 `__version__`；
 > 两个打包脚本会自动读取它并写进 zip 文件名与包内说明。
 > 自己重新打包：`python packaging/build_win_portable.py`（Windows）、
