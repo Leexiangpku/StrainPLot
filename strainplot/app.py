@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import queue
 import re
+import sys
 import threading
 import time
 import traceback
@@ -24,6 +25,25 @@ BG = "#F4F5F7"
 CARD = "#FFFFFF"
 ACCENT = "#3F6CA8"
 UI_FONT = "Microsoft YaHei UI"
+# 按平台挑一个实际存在的界面字体（Windows 用雅黑，macOS 用苹方）
+UI_FONT_CANDIDATES = (
+    "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+    "Hiragino Sans GB", "Helvetica Neue", "DejaVu Sans",
+)
+
+
+def resolve_ui_font() -> str:
+    """在建立 Tk 根窗口后调用，把 UI_FONT 换成系统里真实存在的字族。"""
+    global UI_FONT
+    try:
+        families = set(tkfont.families())
+    except tk.TclError:
+        return UI_FONT
+    for name in UI_FONT_CANDIDATES:
+        if name in families:
+            UI_FONT = name
+            return UI_FONT
+    return UI_FONT
 
 CHECKED = "☑"
 UNCHECKED = "☐"
@@ -98,6 +118,7 @@ FIGURE_PRESETS: dict[str, tuple[float, float, int]] = {
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
+        resolve_ui_font()
         self.title(APP_TITLE)
         self.geometry("1520x940")
         self.minsize(1200, 760)
@@ -140,10 +161,23 @@ class App(tk.Tk):
     # ------------------------------------------------------------------ #
     @staticmethod
     def _default_folder() -> str:
-        here = os.path.dirname(os.path.abspath(__file__))          # .../strainplot
-        outer = os.path.dirname(here)                              # 源码根 或 打包后的 app/
-        roots = [outer, os.path.dirname(outer)]                    # 打包后多探一层（安装根目录）
+        # 依次向上收集"可能放着 示例/ 目录"的候选位置：
+        #   源码运行 → 包根目录；打包成 .app → Contents/Resources、.app 内部、.app 旁边
+        starts = [os.path.dirname(os.path.abspath(__file__)),   # .../strainplot
+                  os.path.dirname(os.path.abspath(sys.executable))]
+        roots: list[str] = []
+        for start in starts:
+            cur = start
+            for _ in range(4):
+                roots += [cur, os.path.join(cur, "Resources")]
+                cur = os.path.dirname(cur)
+                if cur in ("/", ""):
+                    break
+        seen: set[str] = set()
         for root in roots:
+            if not root or root in seen:
+                continue
+            seen.add(root)
             for name in ("示例", "data", "数据", "SampleData"):
                 p = os.path.join(root, name)
                 if os.path.isdir(p):
@@ -1585,7 +1619,8 @@ def main() -> None:
     except Exception:
         tb = traceback.format_exc()
         try:
-            log = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "error.log")
+            os.makedirs(CONFIG_DIR, exist_ok=True)   # 打包成 .app 后自身目录可能只读
+            log = os.path.join(CONFIG_DIR, "error.log")
             with open(log, "w", encoding="utf-8") as fh:
                 fh.write(tb)
         except Exception:

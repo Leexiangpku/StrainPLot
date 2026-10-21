@@ -28,6 +28,11 @@ from .style import AxisStyle, Style
 FONT_DIRS = [
     os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"),
     os.path.expanduser(r"~\AppData\Local\Microsoft\Windows\Fonts"),
+    # macOS：系统字体与用户字体
+    "/System/Library/Fonts/Supplemental",
+    "/System/Library/Fonts",
+    "/Library/Fonts",
+    os.path.expanduser("~/Library/Fonts"),
 ]
 
 # family -> (regular, bold, italic, bold_italic)
@@ -52,13 +57,69 @@ FONT_FILES: dict[str, tuple[str, str, str, str]] = {
     "SimSun": ("simsun.ttc", "simsun.ttc", "simsun.ttc", "simsun.ttc"),
 }
 
+# macOS 上同一字体的文件名和 Windows 不同（没有 arialbd.ttf，而是 "Arial Bold.ttf"），
+# 系统里缺失的字族用外观最接近的 mac 字体替代，保证导出图仍是矢量字体而不是点阵默认字体。
+MAC_FONT_FILES: dict[str, tuple[str, str, str, str]] = {
+    "Arial": ("Arial.ttf", "Arial Bold.ttf", "Arial Italic.ttf", "Arial Bold Italic.ttf"),
+    "Arial Narrow": ("Arial Narrow.ttf", "Arial Narrow Bold.ttf",
+                     "Arial Narrow Italic.ttf", "Arial Narrow Bold Italic.ttf"),
+    "Times New Roman": ("Times New Roman.ttf", "Times New Roman Bold.ttf",
+                        "Times New Roman Italic.ttf", "Times New Roman Bold Italic.ttf"),
+    "Calibri": ("Arial.ttf", "Arial Bold.ttf", "Arial Italic.ttf", "Arial Bold Italic.ttf"),
+    "Cambria": ("Times New Roman.ttf", "Times New Roman Bold.ttf",
+                "Times New Roman Italic.ttf", "Times New Roman Bold Italic.ttf"),
+    "Segoe UI": ("HelveticaNeue.ttc", "HelveticaNeue.ttc", "HelveticaNeue.ttc",
+                 "HelveticaNeue.ttc"),
+    "Tahoma": ("Tahoma.ttf", "Tahoma Bold.ttf", "Tahoma.ttf", "Tahoma Bold.ttf"),
+    "Verdana": ("Verdana.ttf", "Verdana Bold.ttf", "Verdana Italic.ttf",
+                "Verdana Bold Italic.ttf"),
+    "Georgia": ("Georgia.ttf", "Georgia Bold.ttf", "Georgia Italic.ttf",
+                "Georgia Bold Italic.ttf"),
+    "Trebuchet MS": ("Trebuchet MS.ttf", "Trebuchet MS Bold.ttf",
+                     "Trebuchet MS Italic.ttf", "Trebuchet MS Bold Italic.ttf"),
+    "Franklin Gothic Book": ("Arial.ttf", "Arial Bold.ttf", "Arial Italic.ttf",
+                             "Arial Bold Italic.ttf"),
+    "Consolas": ("SFNSMono.ttf", "SFNSMono.ttf", "SFNSMonoItalic.ttf", "SFNSMonoItalic.ttf"),
+    "Courier New": ("Courier New.ttf", "Courier New Bold.ttf", "Courier New Italic.ttf",
+                    "Courier New Bold Italic.ttf"),
+    "Palatino Linotype": ("Times New Roman.ttf", "Times New Roman Bold.ttf",
+                          "Times New Roman Italic.ttf", "Times New Roman Bold Italic.ttf"),
+    "Book Antiqua": ("Times New Roman.ttf", "Times New Roman Bold.ttf",
+                     "Times New Roman Italic.ttf", "Times New Roman Bold Italic.ttf"),
+    "Century Gothic": ("Arial.ttf", "Arial Bold.ttf", "Arial Italic.ttf", "Arial Bold Italic.ttf"),
+    "Microsoft YaHei": ("PingFang.ttc", "PingFang.ttc", "PingFang.ttc", "PingFang.ttc"),
+    "SimSun": ("Hiragino Sans GB.ttc", "Hiragino Sans GB.ttc",
+               "Hiragino Sans GB.ttc", "Hiragino Sans GB.ttc"),
+    "PingFang": ("PingFang.ttc", "PingFang.ttc", "PingFang.ttc", "PingFang.ttc"),
+    "Hiragino Sans GB": ("Hiragino Sans GB.ttc", "Hiragino Sans GB.ttc",
+                         "Hiragino Sans GB.ttc", "Hiragino Sans GB.ttc"),
+}
+
+# 含中文字形、可整段替换的字体（Arial 之类的西文字体没有汉字，会画成方框）
+_CJK_FAMILIES = ("Microsoft YaHei", "PingFang", "Hiragino Sans GB", "SimSun", "SimHei")
+
+
+def _has_cjk(s: str) -> bool:
+    for ch in s:
+        o = ord(ch)
+        if 0x2E80 <= o <= 0x9FFF or 0xF900 <= o <= 0xFAFF or 0xFF00 <= o <= 0xFFEF:
+            return True
+    return False
+
+
+def cjk_family() -> str | None:
+    """挑一个系统里真实存在的中文字族，用于含汉字的文字。"""
+    for fam in _CJK_FAMILIES:
+        if font_path(fam):
+            return fam
+    return None
+
 _FONT_CACHE: dict[tuple, ImageFont.FreeTypeFont] = {}
 _MISSING_FONTS: set[str] = set()
 
 
 def font_path(family: str, bold: bool = False, italic: bool = False) -> str | None:
-    files = FONT_FILES.get(family)
-    if files is None:
+    if family not in FONT_FILES and family not in MAC_FONT_FILES:
         # 允许直接给文件名
         for d in FONT_DIRS:
             p = os.path.join(d, family)
@@ -76,20 +137,36 @@ def font_path(family: str, bold: bool = False, italic: bool = False) -> str | No
     else:
         order += [1]
     for i in order:
-        for d in FONT_DIRS:
-            p = os.path.join(d, files[i])
-            if os.path.exists(p):
-                return p
+        names: list[str] = []
+        win = FONT_FILES.get(family)
+        if win:
+            names.append(win[i])
+        mac = MAC_FONT_FILES.get(family)
+        if mac:
+            names.append(mac[i])
+        for name in names:
+            for d in FONT_DIRS:
+                p = os.path.join(d, name)
+                if os.path.exists(p):
+                    return p
     return None
 
 
-def get_font(family: str, size_px: float, bold: bool = False, italic: bool = False):
+def get_font(family: str, size_px: float, bold: bool = False, italic: bool = False,
+             text: str = ""):
+    if text and _has_cjk(text) and family not in _CJK_FAMILIES:
+        # 西文字体里没有汉字，遇到中文就整段换用系统中文字体，避免方框
+        family = cjk_family() or family
     key = (family, round(size_px, 2), bool(bold), bool(italic))
     f = _FONT_CACHE.get(key)
     if f is not None:
         return f
     px = max(1, int(round(size_px)))
     path = font_path(family, bold, italic)
+    if path is None and family not in ("Arial", "Helvetica"):
+        # 该字族在系统里不存在时退回 Arial/Helvetica，避免退化成点阵默认字体
+        alt = font_path("Arial", bold, italic) or font_path("Helvetica", bold, italic)
+        path = alt
     try:
         f = ImageFont.truetype(path, px) if path else ImageFont.load_default()
     except Exception:  # noqa: BLE001
@@ -111,7 +188,7 @@ def text_size_pt(s: str, size_pt: float, bold: bool, italic: bool, family: str) 
     hit = _SIZE_CACHE.get(key)
     if hit is not None:
         return hit
-    f = get_font(family, size_pt * _MEASURE_SCALE, bold, italic)
+    f = get_font(family, size_pt * _MEASURE_SCALE, bold, italic, s)
     w = f.getlength(s) / _MEASURE_SCALE
     asc, desc = f.getmetrics()
     out = (w, (asc + desc) / _MEASURE_SCALE)
@@ -313,7 +390,7 @@ def _draw_text_raster(img: Image.Image, op: dict, scale: float) -> None:
     if not s:
         return
     size_px = op["size"] * scale
-    f = get_font(op["family"], size_px, op["bold"], op["italic"])
+    f = get_font(op["family"], size_px, op["bold"], op["italic"], s)
     color = parse_color(op["color"])
     x = op["x"] * scale
     y = op["y"] * scale

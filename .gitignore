@@ -11,6 +11,7 @@ venv/
 dist/
 build/
 *.spec
+!packaging/macos/StrainPlot.spec
 packaging/*.bak
 
 # ---------- 用户数据与导出结果（原始实验数据不入库） ----------
@@ -33,3 +34,6 @@ error.log
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# ---------- 本地构建环境（运行时/venv/PyInstaller 缓存，可重建） ----------
+.build/

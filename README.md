@@ -53,25 +53,39 @@ v2 起不再写死"应变–应力"：40 种常见物理量（力学 / 热分析
 | 系统 | 下载 | 大小 | 用法 |
 | --- | --- | --- | --- |
 | Windows 10/11 x64 | **[StrainPlot-0.20-win64.zip](https://github.com/Leexiangpku/StrainPLot/releases/download/v0.20/StrainPlot-0.20-win64.zip)** | 33 MB | 解压到任意目录（含中文、含空格都行），双击 `StrainPlot.exe` |
-| macOS 10.15+ | **[StrainPlot-0.20-macos.zip](https://github.com/Leexiangpku/StrainPLot/releases/download/v0.20/StrainPlot-0.20-macos.zip)** | 109 KB | 解压，双击 `StrainPlot.app` |
+| macOS 11+ (Apple Silicon / Intel) | **[Releases](https://github.com/Leexiangpku/StrainPLot/releases) → `StrainPlot-0.20-macos.zip`** | 22 MB | 解压，双击 `StrainPlot.app`（自带 Python + Tk，无需装任何东西） |
 
 > 上面两个链接指向 [Releases](https://github.com/Leexiangpku/StrainPLot/releases) 里的安装包，
 > 点一下就开始下载，不需要 git、不需要装 Python。
+> **注意**：v0.20 早期那个 109 KB 的 macOS 包是"启动器"方案，在新版 macOS 上必崩，已作废；
+> 换成自带运行时的包（约 22 MB），没找到就用下面的 `build_macos.sh` 自己打一个。
 > 版本号（`0.20`）只有一个来源：`strainplot/__init__.py` 里的 `__version__`；
 > 两个打包脚本会自动读取它并写进 zip 文件名与包内说明。
 > 自己重新打包：`python packaging/build_win_portable.py`（Windows）、
-> `python packaging/build_macos_bundle.py`（任意平台，产出 .app 的 zip）。
+> `./packaging/macos/build_macos.sh`（macOS，自带运行时）。
 
 Windows 版自带 Python 3.12 运行时和全部依赖，解压后约 94 MB；不写注册表、不装系统服务，删目录即卸载。
 
-macOS 版是一个真正的 `.app`（带图标），首次启动会在
-`~/Library/Application Support/StrainPlot/venv` 建一个独立环境并联网安装
-`pillow / numpy / openpyxl`（一次即可，之后离线可用），因此**需要本机有 Python 3.9+**
-（推荐 python.org 安装包，自带 tkinter；Homebrew 版需 `brew install python-tk@3.12`）。
-想要完全自带运行时、不依赖本机 Python 的 `.app`，在 macOS 上执行 `bash packaging/macos/build_macos.sh`。
+macOS 版是**自带运行时**的 `.app`：内置 CPython 3.12 + Tk 9 + 全部依赖，
+目标机器不需要装 Python、也不需要联网，解压后直接双击。
 
-> 本包未做 Apple 公证（无开发者账号），若提示“无法验证开发者”：
-> 右键 `StrainPlot.app` → 打开；或 `xattr -dr com.apple.quarantine StrainPlot.app`。
+> **为什么不用系统 Python**：macOS 自带的 `/usr/bin/python3` 只带 Tk 8.5，
+> 在新版 macOS 上会直接报 `macOS 14 (1408) or later required, have instead 14 (1406) !`，
+> 窗口一闪就退。所以 macOS 版必须打包 python-build-standalone 的运行时（含 Tk 9）。
+
+> 本包未做 Apple 公证（无开发者账号），若提示“无法验证开发者”或“已损坏”：
+> 右键 `StrainPlot.app` → 打开；或 `xattr -cr StrainPlot.app`（去掉 quarantine 属性即可）。
+> 想确认程序本体没坏：`StrainPlot.app/Contents/MacOS/StrainPlot --selftest`。
+
+自己重新打包（需要 macOS + 联网一次）：
+
+```bash
+./packaging/macos/build_macos.sh          # → dist/StrainPlot.app
+./packaging/macos/build_macos.sh --dmg    # → dist/StrainPlot.dmg（hdiutil 不可用时退化为 zip）
+```
+
+脚本会自动下载自带 Tk 9 的 CPython 3.12、建 venv、跑 PyInstaller、内置 `示例/` 里的 CSV、
+ad-hoc 签名，并用打包好的 `.app` 自己跑一遍 `--selftest`（读数据 → 建图 → 出 PNG）。
 
 ### 方式 B：源码运行
 
@@ -263,8 +277,9 @@ docs/                   界面截图与示例图（preview / preview2 由原始�
 packaging/              打包工具
   make_icons.py         生成 icon.png / icon.ico / icon.icns
   build_win_portable.py Windows 便携版（内嵌 Python 运行时）
-  build_macos_bundle.py macOS .app 包（引导式，需本机 Python）
-  macos/build_macos.sh  macOS 上的 PyInstaller 自包含构建（生成 .app + .dmg）
+  macos/build_macos.sh  macOS 自包含构建（.app / .dmg，自带 Python + Tk）
+  macos/entry.py        打包入口（也提供 --selftest 自检）
+  macos/StrainPlot.spec PyInstaller 配置
   win/Launcher.cs       Windows 图形启动器，用系统自带 csc.exe 编译
 dist/                   打包产物
 ```
@@ -291,23 +306,27 @@ python packaging\build_win_portable.py
 > 便携版不写注册表、不改 PATH、不装服务；拷走目录即可迁移，删除即卸载。
 > 程序启动时把 `python312.zip` 之外的目录设为 `sys.path`，所以机器上没装 Python 也能跑。
 
-### macOS
+### macOS（自带运行时）
 
-两条路，按需求选：
+```bash
+./packaging/macos/build_macos.sh          # → dist/StrainPlot.app
+./packaging/macos/build_macos.sh --dmg    # → dist/StrainPlot.dmg（hdiutil 不可用时退化为 zip）
+```
 
-1. **免安装包**（`dist/StrainPlot-1.0.0-macos.zip`，本机已生成）：解压得到
-   `StrainPlot.app`，双击即用。`.app` 的可执行体是一个 bash 引导器，首次运行自动建
-   venv 并装依赖，因此要求本机有 Python 3.9+。
-   生成命令：`python packaging\build_macos_bundle.py`（zip 内 `StrainPlot.app/Contents/MacOS/StrainPlot`
-   与 `StrainPlot.command` 的权限位已写成 755）。
-2. **自包含 .app / .dmg**：把仓库拷到 macOS，执行
+脚本会把整条链跑完，任何一步失败都会停下来报错：
 
-   ```bash
-   bash packaging/macos/build_macos.sh
-   ```
+1. 下载 python-build-standalone 的 CPython 3.12（含 **Tk 9**，按 `uname -m` 选 arm64/x86_64）；
+2. 建 `.build/venv` 并装 pillow / numpy / openpyxl / pyinstaller；
+3. PyInstaller 按 `packaging/macos/StrainPlot.spec` 打出 `StrainPlot.app`；
+4. 把 `示例/` 里的 CSV 复制进 `Contents/Resources/示例`（只带解析需要的文件）；
+5. ad-hoc 签名（`codesign --sign -`）；
+6. 用打包好的 `.app` 自己跑 `--selftest`：读数据 → 建图 → 写 PNG，任一步失败就说明包坏了。
 
-   PyInstaller 会打出带运行时、带图标、ad-hoc 签名的 `StrainPlot.app` 与 `.dmg`。
-   PyInstaller 不能跨平台编译，所以这一步必须在 macOS 上做。
+`.app` 自带解释器与 Tk，拷到别的 Mac 上不需要装 Python、不需要联网。
+PyInstaller 不能跨平台编译，所以这一步必须在 macOS 上做。
+
+> 早期还有一个"引导器"方案（`Contents/MacOS/StrainPlot` 是个 bash 脚本，首次运行建 venv），
+> 它依赖本机 Python 的 Tk；macOS 14+ 自带的是 Tk 8.5，直接崩，已删除。
 
 ---
 
