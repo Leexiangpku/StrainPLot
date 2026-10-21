@@ -1,5 +1,23 @@
 # StrainPlot · 一键数据绘图（X–Y 通用）
 
+[![release](https://img.shields.io/github/v/release/Leexiangpku/StrainPLot?label=release&color=2f6fb3)](https://github.com/Leexiangpku/StrainPLot/releases)
+[![downloads](https://img.shields.io/github/downloads/Leexiangpku/StrainPLot/total?label=downloads&color=0da58d)](https://github.com/Leexiangpku/StrainPLot/releases)
+[![python](https://img.shields.io/badge/python-3.9%2B-465d8e)](https://www.python.org/)
+
+<p align="center">
+  <a href="https://github.com/Leexiangpku/StrainPLot/releases/download/v0.20/StrainPlot-0.20-win64.zip">
+    <img alt="下载 Windows 版" src="https://img.shields.io/badge/⬇_下载_Windows_版_(x64,_免安装)-2f6fb3?style=for-the-badge&logo=windows&logoColor=white">
+  </a>
+  <a href="https://github.com/Leexiangpku/StrainPLot/releases/download/v0.20/StrainPlot-0.20-macos.zip">
+    <img alt="下载 macOS 版" src="https://img.shields.io/badge/⬇_下载_macOS_版_(10.15+)-111111?style=for-the-badge&logo=apple&logoColor=white">
+  </a>
+</p>
+
+<p align="center">
+  <sub>点按钮即下载 · 全部版本见 <a href="https://github.com/Leexiangpku/StrainPLot/releases">Releases</a> ·
+  国内下载慢可用镜像：<code>https://ghproxy.net/</code> + 上面的链接</sub>
+</p>
+
 把一个文件夹里的实验数据（Instron `.is_tens` 原始导出 / Excel / CSV / TXT）自动读成 **X–Y 曲线**，
 按你给的 Origin 图样式实时预览、可视化调参，并导出 **PNG / SVG / TIFF / PDF**。
 
@@ -32,14 +50,16 @@ v2 起不再写死"应变–应力"：40 种常见物理量（力学 / 热分析
 
 ### 方式 A：免安装版（推荐，不需要装 Python）
 
-| 系统 | 文件 | 用法 |
-| --- | --- | --- |
-| Windows 10/11 x64 | `dist/StrainPlot-0.20-win64.zip` | 解压到任意目录（含中文、含空格都行），双击 `StrainPlot.exe` |
-| macOS 10.15+ | `dist/StrainPlot-0.20-macos.zip` | 解压，双击 `StrainPlot.app` |
+| 系统 | 下载 | 大小 | 用法 |
+| --- | --- | --- | --- |
+| Windows 10/11 x64 | **[StrainPlot-0.20-win64.zip](https://github.com/Leexiangpku/StrainPLot/releases/download/v0.20/StrainPlot-0.20-win64.zip)** | 33 MB | 解压到任意目录（含中文、含空格都行），双击 `StrainPlot.exe` |
+| macOS 10.15+ | **[StrainPlot-0.20-macos.zip](https://github.com/Leexiangpku/StrainPLot/releases/download/v0.20/StrainPlot-0.20-macos.zip)** | 109 KB | 解压，双击 `StrainPlot.app` |
 
+> 上面两个链接指向 [Releases](https://github.com/Leexiangpku/StrainPLot/releases) 里的安装包，
+> 点一下就开始下载，不需要 git、不需要装 Python。
 > 版本号（`0.20`）只有一个来源：`strainplot/__init__.py` 里的 `__version__`；
 > 两个打包脚本会自动读取它并写进 zip 文件名与包内说明。
-> 重新打包：`python packaging/build_win_portable.py`（Windows）、
+> 自己重新打包：`python packaging/build_win_portable.py`（Windows）、
 > `python packaging/build_macos_bundle.py`（任意平台，产出 .app 的 zip）。
 
 Windows 版自带 Python 3.12 运行时和全部依赖，解压后约 94 MB；不写注册表、不装系统服务，删目录即卸载。
