@@ -9,7 +9,7 @@ from .dataio import (Column, ScanResult, Series, Table, XYMap, build_series, sca
 from .render import Figure, PlotSeries, render_image, save_figure
 from .style import SeriesStyle, Style, reference_style
 
-__version__ = "2.0.0"
+__version__ = "0.20"
 __all__ = [
     "Series", "ScanResult", "Table", "Column", "XYMap", "scan_folder", "scan_tables",
     "build_series", "variables", "presets", "Style", "SeriesStyle", "reference_style",

@@ -419,9 +419,12 @@ class App(tk.Tk):
             return f"{i + 1} · （空置）"
         if s.name:
             return f"{i + 1} · {s.name}"
-        x = s.x_col or self._first_col_of_kind(s.x_kind) or "?"
-        y = s.y_col or self._first_col_of_kind(s.y_kind) or "?"
-        return f"{i + 1} · {x} → {y}"
+        x = s.x_col or self._first_col_of_kind(s.x_kind)
+        y = s.y_col or self._first_col_of_kind(s.y_kind)
+        if not x and not y:
+            miss = "（未载入数据）" if not self._col_catalog else "（本文件夹无此列）"
+            return f"{i + 1} · {miss}"
+        return f"{i + 1} · {x or '?'} → {y or '?'}"
 
     def _refresh_slot_box(self) -> None:
         self.preset_box.configure(values=[self._slot_label(i) for i in range(presets.SLOT_COUNT)])

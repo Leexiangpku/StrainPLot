@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -18,7 +19,16 @@ ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 NAME = "StrainPlot-win64"
 APP_NAME = "StrainPlot"
-VERSION = "1.0.0"
+
+
+def _read_version() -> str:
+    """版本号只有一个来源：strainplot/__init__.py。"""
+    src = (ROOT / "strainplot" / "__init__.py").read_text(encoding="utf-8")
+    m = re.search(r'__version__\s*=\s*["\']([^"\']+)', src)
+    return m.group(1) if m else "0.0"
+
+
+VERSION = _read_version()
 
 SRC_PY = Path(sys.base_prefix)
 SRC_PKG = ROOT / "strainplot"
@@ -35,19 +45,25 @@ SKIP_LIB = {
     "site-packages",  # 单独处理
 }
 
-README = """StrainPlot 1.0.0  (Windows 64 位免安装版)
+README = """StrainPlot {version}  (Windows 64 位免安装版)
 ========================================
 
 双击 StrainPlot.exe 即可运行，无需安装 Python。
 
+这个版本做什么
+--------------
+通用 X–Y 绘图：不再只认应变–应力。程序读入文件夹后，把每个文件**第一行的表头**
+原样列出来，你选哪两列就画哪两列（拉伸 / TGA / DSC / UV-Vis / XRD / CV / 滴定 …
+都一样），5 个可编辑预设保存常用组合，`⇄ 反转 X–Y` 一键互换。
+
 第一次使用
 ----------
 1. 双击 StrainPlot.exe；
-2. 点左上角「选择数据文件夹」，选中装有 Instron 数据的文件夹
-   （里面应有 *.is_tens 与同名 xxx.is_tens_RawData\\Specimen_RawData_*.csv，
-    或 Excel / CSV 表格）；
+2. 点左上角「选择数据文件夹」，选中装有原始数据的文件夹
+   （Instron 的 *.is_tens + 同名 *_is_tens_RawData\\Specimen_RawData_*.csv，
+    或 Excel / CSV / TXT 表格均可）；
 3. 左侧勾选曲线，中间实时预览，右侧六个标签页调样式；
-4. 右上角「导出图片」输出 PNG / SVG / TIFF / PDF。
+4. 右上角「导出图片」输出 PNG / SVG / TIFF / PDF（150–1200 dpi）。
 
 目录说明
 --------
@@ -56,19 +72,19 @@ app\\                程序本体（Python 源码）
 runtime\\            自带的 Python 3.12 运行时（含 numpy / Pillow / openpyxl / tkinter）
 strainplot.log      运行日志（启动异常时先看这个）
 
-样式模板保存在 %USERPROFILE%\\.strainplot\\ 下，可复制到别的电脑复用。
+样式模板与读取预设保存在 %USERPROFILE%\\.strainplot\\ 下，可复制到别的电脑复用。
 
 制图默认值
 ----------
 4 x 3 inch @ 600 dpi；Arial Bold；刻度朝内；上/右轴只画轴线不画刻度；
-Strain-Stress 轴标题；数据范围上下各留 10%。
+数据范围上下各留 10%；轴标题自动转英文（Strain (%) / Stress (kPa)）。
 
 遇到问题
 --------
 - 双击没反应：看 strainplot.log；
 - 提示缺少 VCRUNTIME140.dll：安装「Microsoft Visual C++ 2015-2022 运行库 (x64)」；
 - 系统要求：Windows 10 / 11 64 位。
-"""
+""".format(version=VERSION)
 
 
 def _ignore_site(dirname: str, names: list[str]) -> set[str]:

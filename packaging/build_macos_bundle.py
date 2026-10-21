@@ -7,6 +7,7 @@ packaging/macos/build_macos.sh（PyInstaller）。
 """
 from __future__ import annotations
 
+import re
 import shutil
 import stat
 import zipfile
@@ -14,7 +15,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
-VERSION = "1.0.0"
+
+
+def _read_version() -> str:
+    src = (ROOT / "strainplot" / "__init__.py").read_text(encoding="utf-8")
+    m = re.search(r'__version__\s*=\s*["\']([^"\']+)', src)
+    return m.group(1) if m else "0.0"
+
+
+VERSION = _read_version()
 NAME = "StrainPlot"
 STAGE = DIST / f"{NAME}-macos"
 
@@ -61,10 +70,16 @@ fi
 PYTHONPATH="$SRC_APP${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m strainplot >>"$LOG" 2>&1
 """
 
-README = """StrainPlot 1.0.0 · macOS
+README = """StrainPlot {version} · macOS
 ========================
 
 双击 StrainPlot.app 即可运行。
+
+这个版本做什么
+--------------
+通用 X–Y 绘图：程序读入文件夹后，把每个文件**第一行的表头**原样列出来，
+你选哪两列就画哪两列（拉伸 / TGA / DSC / UV-Vis / XRD / CV / 滴定 … 都一样），
+5 个可编辑预设保存常用组合，`⇄ 反转 X–Y` 一键互换。
 
 首次启动
 --------
@@ -90,10 +105,10 @@ README = """StrainPlot 1.0.0 · macOS
 
 功能提要
 --------
-选择数据文件夹 → 左侧勾选曲线 → 中间实时预览 → 右侧六个标签页调样式 → 导出 PNG/SVG/TIFF/PDF。
-默认样式：4×3 inch @600 dpi、Arial Bold、刻度朝内、上/右轴只画轴线、Strain-Stress 轴标题。
-样式模板保存在 ~/.strainplot/。
-"""
+选择数据文件夹 → 左侧勾选曲线 → 中间实时预览 → 右侧七个标签页调样式 → 导出 PNG/SVG/TIFF/PDF。
+默认样式：4×3 inch @600 dpi、Arial Bold、刻度朝内、上/右轴只画轴线；轴标题自动转英文。
+样式模板与读取预设保存在 ~/.strainplot/。
+""".format(version=VERSION)
 
 REQUIREMENTS = "pillow>=9.0\nnumpy>=1.22\nopenpyxl>=3.0\n"
 

@@ -34,14 +34,15 @@ v2 起不再写死"应变–应力"：40 种常见物理量（力学 / 热分析
 
 | 系统 | 文件 | 用法 |
 | --- | --- | --- |
-| Windows 10/11 x64 | `dist/StrainPlot-1.0.0-win64.zip` | 解压到任意目录（含中文、含空格都行），双击 `StrainPlot.exe` |
-| macOS 10.15+ | `dist/StrainPlot-1.0.0-macos.zip` | 解压，双击 `StrainPlot.app` |
+| Windows 10/11 x64 | `dist/StrainPlot-0.20-win64.zip` | 解压到任意目录（含中文、含空格都行），双击 `StrainPlot.exe` |
+| macOS 10.15+ | `dist/StrainPlot-0.20-macos.zip` | 解压，双击 `StrainPlot.app` |
 
-> 现有的两个 zip 是 **v1.0.0（拉伸专用版）** 的产物。v2 新增了变量系统，等功能定稿后再重新打包发布
-> （脚本已就绪：`packaging/build_win_portable.py`、`packaging/build_macos_bundle.py`，版本号在 `strainplot/__init__.py`）。
-> 现在想试 v2 直接用下面的方式 B。
+> 版本号（`0.20`）只有一个来源：`strainplot/__init__.py` 里的 `__version__`；
+> 两个打包脚本会自动读取它并写进 zip 文件名与包内说明。
+> 重新打包：`python packaging/build_win_portable.py`（Windows）、
+> `python packaging/build_macos_bundle.py`（任意平台，产出 .app 的 zip）。
 
-Windows 版自带 Python 3.12 运行时和全部依赖，解压后约 100 MB；不写注册表、不装系统服务，删目录即卸载。
+Windows 版自带 Python 3.12 运行时和全部依赖，解压后约 94 MB；不写注册表、不装系统服务，删目录即卸载。
 
 macOS 版是一个真正的 `.app`（带图标），首次启动会在
 `~/Library/Application Support/StrainPlot/venv` 建一个独立环境并联网安装
@@ -322,5 +323,14 @@ Instron 一个测试文件里有多根试样（repeat），所以按"文件=组�
 因此改用自研渲染引擎复刻 Origin 的导出效果，同时避免了"必须装 Origin 才能出图"的限制。
 
 **Q：便携版双击没反应 / 报错找不到 Python？**
-`StrainPlot.exe` 只是启动器，真正的运行时在同目录的 `python/` 下，**整个文件夹必须一起拷**
-（不要只拷 exe）。若报错，看同目录是否生成了 `启动错误.log`。
+`StrainPlot.exe` 只是启动器，真正的运行时在同目录的 `runtime/` 下，**整个文件夹必须一起拷**
+（不要只拷 exe）。若报错，看同目录的 `strainplot.log`（正常运行时为 0 字节）。
+
+---
+
+## 11. 版本记录
+
+| 版本 | 要点 |
+| --- | --- |
+| **0.20** | 变量系统：40 种物理量识别、5 个可编辑读取预设、按表头原文取列、⇄ 反转 X–Y；通用 X–Y 绘图（TGA / DSC / UV-Vis / XRD / CV / 滴定…）；上/右轴只画轴线；线型（实/虚/点/点划）修复；配色按 CIELAB 去重与重排；一键打包 win/mac |
+| 1.0.0 | 拉伸专用版：Instron `.is_tens` + `_RawData` 扫描、Origin 样式渲染引擎、GUI 实时预览、PNG/SVG/TIFF/PDF 导出 |

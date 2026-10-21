@@ -5,9 +5,12 @@
 #   .\push-to-github.ps1 -Repo https://github.com/<你的用户名>/StrainPlot.git -Token ghp_xxx
 #
 # 说明：
-#   - 仓库已在本地完成 3 次提交（main 分支），本脚本只负责建 remote 并推送；
+#   - 仓库已在本地完成提交（main 分支）并打了版本 tag（如 v0.20）；
+#   - 本脚本会推送分支 + 全部 tag；
 #   - 不传 -Token 时交给 Git 凭据管理器提示登录（推荐，token 不会留在历史里）；
-#   - 目标仓库需先在网页端新建（空仓库，不要勾选 README/.gitignore）。
+#   - 目标仓库需先在网页端新建（空仓库，不要勾选 README/.gitignore）；
+#   - 完全没网时，也可用 dist\StrainPlot-0.20-repo.bundle 在别的机器上还原：
+#       git clone StrainPlot-0.20-repo.bundle StrainPlot
 param(
     [Parameter(Mandatory = $true)]
     [string]$Repo,
@@ -41,6 +44,7 @@ if (git remote | Select-String -Quiet "^$remote$") {
 
 Write-Host "推送到 $Repo ($Branch) ..."
 git push -u $remote $Branch
+git push $remote --tags
 
 if ($Token) {
     # 避免 token 明文留在 .git/config 里
